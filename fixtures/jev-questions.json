@@ -1,0 +1,46 @@
+{
+  "travel": {
+    "travel_mode": {
+      "type": "choice",
+      "instructions": "Choose a practical travel mode using the rounded driving duration and distance. Consider direction and candidate times. Do not infer addresses or assume transit service is available.",
+      "criteria": {
+        "DRIVE": "car or taxi",
+        "WALK": "walking",
+        "BICYCLE": "bicycle",
+        "TRANSIT": "public transit"
+      }
+    },
+    "extra_buffer": {
+      "type": "choice",
+      "instructions": "Choose a conservative extra arrival margin using the trip direction and candidate times. This is added on top of the authoritative route duration and owner minimum buffer.",
+      "criteria": {
+        "MIN_0": "0 extra minutes",
+        "MIN_5": "5 extra minutes",
+        "MIN_10": "10 extra minutes",
+        "MIN_15": "15 extra minutes"
+      }
+    }
+  },
+  "notice": {
+    "booking_notice": {
+      "type": "choice",
+      "instructions": "Choose how much advance notice to require for new meetings based on the next two workdays. Keep the owner minimum for light or meeting-heavy days. Extend it when focus work or deadlines need protection. Never shorten the owner minimum. Use only the aggregate minutes supplied.",
+      "criteria": {
+        "BASE": "keep the owner minimum",
+        "EXTEND_50": "allow 50 percent more notice",
+        "DOUBLE": "allow twice the owner minimum"
+      }
+    }
+  },
+  "week": {
+    "weekly_adjustment": {
+      "type": "choice",
+      "instructions": "Which one adjustment best protects the owner during this unusually busy week? Choose from the aggregate workload only. This is a private suggestion for review, not an automatic calendar change.",
+      "criteria": {
+        "cluster_meetings": "Group new calls onto days that already contain meetings.",
+        "protect_focus": "Keep long uninterrupted work blocks on the quieter days.",
+        "protect_deadline": "Reduce new meetings before an upcoming deadline."
+      }
+    }
+  }
+}

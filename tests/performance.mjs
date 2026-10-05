@@ -1,0 +1,10 @@
+// Local CPU/runtime comparison only. No production accounts or provider calls.
+import {spawn} from 'node:child_process';
+import {once} from 'node:events';
+import {createServer} from 'node:http';
+import {mkdtempSync,rmSync,writeFileSync} from 'node:fs';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
+const root=new URL('..',import.meta.url).pathname;
+async function measure(name,command,args){const dir=mkdtempSync(join(tmpdir(),'jev-perf-'));const s=createServer().listen(0,'127.0.0.1');await once(s,'listening');const port=s.address().port;await new Promise(r=>s.close(r));const child=spawn(command,args,{cwd:root+'reference',env:{PATH:process.env.PATH,PORT:String(port),DATABASE_PATH:join(dir,'fixture.sqlite'),APP_ENCRYPTION_KEY:'synthetic-performance-key',DEMO_MODE:'true',APP_BASE_URL:`http://127.0.0.1:${port}`},stdio:['ignore','pipe','pipe']});await once(child.stdout,'data');const times=[];try{for(let i=0;i<120;i++){const start=performance.now();const r=await fetch(`http://127.0.0.1:${port}/api/availability`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({date:'2030-10-07',viewerTimeZone:'Europe/Rome',durationMinutes:30})});if(!r.ok)throw Error(await r.text());await r.json();if(i>=20)times.push(performance.now()-start);}const ps=spawn('/bin/ps',['-o','rss=','-p',String(child.pid)],{stdio:['ignore','pipe','ignore']});let rss='';ps.stdout.on('data',d=>rss+=d);await once(ps,'exit');times.sort((a,b)=>a-b);return{name,samples:100,p50Ms:times[49],p95Ms:times[94],rssKiB:Number(rss),providerCalls:0};}finally{child.kill();await once(child,'exit');rmSync(dir,{recursive:true,force:true});}}
+const results=[];results.push(await measure('Node 26 snapshot',process.execPath,['server.js']));results.push(await measure('Rust release',root+'target/release/jev-calendar',['--private']));const report={scope:'Sequential local demo availability. Synthetic calendars. No upstream latency, provider calls or production traffic.',results};writeFileSync(root+'evidence/performance.json',JSON.stringify(report,null,2)+'\n');console.log(JSON.stringify(report,null,2));

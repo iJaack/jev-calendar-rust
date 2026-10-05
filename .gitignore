@@ -1,0 +1,17 @@
+/target/
+/data/
+/dist/
+/.local/
+/.http-compat/
+/reference/
+.env
+.env.*
+!.env.example
+*.sqlite*
+/evidence/*
+!/evidence/baseline-manifest.json
+!/evidence/cleanup-result.json
+!/evidence/differential-result.json
+!/evidence/performance.json
+__pycache__/
+.DS_Store

@@ -1,0 +1,24 @@
+{
+  "at": "2026-10-05T22:27:00.793833+00:00",
+  "checks": {
+    "nativeUnits": 3,
+    "differentialComparisons": 5920,
+    "preservedHttp": 6,
+    "fakeProviders": 10,
+    "gatewaySuites": 1,
+    "releaseReferenceTests": 6,
+    "fmt": "passed",
+    "clippy": "passed",
+    "baselineHashes": "verified"
+  },
+  "productionRelease": "20261005T213517Z-b4f5df9e9d55",
+  "productionRestarted": false,
+  "liveProviderWrites": false,
+  "changes": [
+    "Readable advisory, event fetch and transaction code",
+    "Removed unused direct serde dependency",
+    "Baseline checks allow original documentation updates but reject runtime/oracle drift",
+    "Retained backend recorded for Node/Rust rollback and failed-upgrade recovery",
+    "Reproducible compressed 46-file Node test oracle"
+  ]
+}

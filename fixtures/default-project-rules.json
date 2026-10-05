@@ -1,0 +1,122 @@
+[
+  {
+    "name": "ACPs",
+    "keywords": [
+      "ACPs"
+    ],
+    "type": "focus",
+    "calendarIds": []
+  },
+  {
+    "name": "Constraint Architecture",
+    "keywords": [
+      "Constraint Architecture"
+    ],
+    "type": "focus",
+    "calendarIds": []
+  },
+  {
+    "name": "Eva Identity & Distribution",
+    "keywords": [
+      "Eva Identity",
+      "Eva Distribution"
+    ],
+    "type": "focus",
+    "calendarIds": []
+  },
+  {
+    "name": "Eva Protocol",
+    "keywords": [
+      "Eva Protocol",
+      "EVA token"
+    ],
+    "type": "focus",
+    "calendarIds": []
+  },
+  {
+    "name": "Flow / Pommidoro",
+    "keywords": [
+      "Pommidoro",
+      "Flow app"
+    ],
+    "type": "focus",
+    "calendarIds": []
+  },
+  {
+    "name": "Gem Mint Strategy (GMS)",
+    "keywords": [
+      "Gem Mint",
+      "GMS",
+      "GM10",
+      "$CATCH"
+    ],
+    "type": "focus",
+    "calendarIds": []
+  },
+  {
+    "name": "Hundred",
+    "keywords": [
+      "Hundred"
+    ],
+    "type": "focus",
+    "calendarIds": []
+  },
+  {
+    "name": "Jaack Website",
+    "keywords": [
+      "Jaack Website",
+      "jaack.me"
+    ],
+    "type": "focus",
+    "calendarIds": []
+  },
+  {
+    "name": "Mission Control",
+    "keywords": [
+      "Mission Control"
+    ],
+    "type": "focus",
+    "calendarIds": []
+  },
+  {
+    "name": "ParcelPilot",
+    "keywords": [
+      "ParcelPilot"
+    ],
+    "type": "focus",
+    "calendarIds": []
+  },
+  {
+    "name": "Redbridge Advisory",
+    "keywords": [
+      "Redbridge"
+    ],
+    "type": "meetings",
+    "calendarIds": []
+  },
+  {
+    "name": "Sea Temperature",
+    "keywords": [
+      "Sea Temperature"
+    ],
+    "type": "focus",
+    "calendarIds": []
+  },
+  {
+    "name": "Team1 Italy",
+    "keywords": [
+      "Team1",
+      "Team One"
+    ],
+    "type": "meetings",
+    "calendarIds": []
+  },
+  {
+    "name": "THICC",
+    "keywords": [
+      "THICC"
+    ],
+    "type": "focus",
+    "calendarIds": []
+  }
+]

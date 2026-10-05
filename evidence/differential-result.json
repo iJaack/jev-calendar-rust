@@ -1,0 +1,30 @@
+{
+  "cases": 5920,
+  "pass": 5920,
+  "crypto": "bidirectional",
+  "zones": [
+    "Europe/Rome",
+    "America/New_York",
+    "Asia/Tokyo",
+    "Australia/Sydney",
+    "Pacific/Auckland",
+    "Asia/Kathmandu",
+    "Asia/Kolkata",
+    "Pacific/Chatham",
+    "UTC"
+  ],
+  "days": [
+    "2030-03-09",
+    "2030-03-10",
+    "2030-03-11",
+    "2030-03-30",
+    "2030-03-31",
+    "2030-04-01",
+    "2030-10-26",
+    "2030-10-27",
+    "2030-10-28",
+    "2030-11-02",
+    "2030-11-03",
+    "2030-11-04"
+  ]
+}

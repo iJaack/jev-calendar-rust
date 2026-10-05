@@ -1,0 +1,21 @@
+{
+  "scope": "Sequential local demo availability. Synthetic calendars. No upstream latency, provider calls or production traffic.",
+  "results": [
+    {
+      "name": "Node 26 snapshot",
+      "samples": 100,
+      "p50Ms": 7.279083999999955,
+      "p95Ms": 10.31854199999998,
+      "rssKiB": 258960,
+      "providerCalls": 0
+    },
+    {
+      "name": "Rust release",
+      "samples": 100,
+      "p50Ms": 2.308749999999918,
+      "p95Ms": 2.851957999999968,
+      "rssKiB": 14336,
+      "providerCalls": 0
+    }
+  ]
+}
