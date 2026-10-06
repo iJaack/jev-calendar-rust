@@ -11,6 +11,7 @@ function fixture({prepared=true,allDates=false}={}) {
   const first = {date:'2026-10-09', viewerTimeZone:'Europe/Rome', hostTimezone:'Europe/Rome', snapshotAgeMs:0,previewMaxAgeMs:120_000,candidates:[{start:'2026-10-09T13:00:00Z',end:'2026-10-09T13:30:00Z'}]};
   const calls = [], elements = new Map();
   const context = vm.createContext({
+    document:{visibilityState:'hidden'},
     performance:{now:()=>currentTime},
     setTimeout:(fn,delay)=>{const id=++timerId;timers.set(id,{fn,due:currentTime+delay});return id;},
     clearTimeout:id=>timers.delete(id),showCalendar(){},
@@ -111,4 +112,23 @@ test('server invalidation immediately withdraws every cached preview',async()=>{
   f.context.request=async()=>{throw Object.assign(Error('Calendar changed'),{invalidatePreview:true});};
   await f.context.selectDate('2026-10-13');assert.equal(f.context.state.availability,null);
   assert.equal(f.context.state.availabilityCache.size,0);assert.equal(f.context.state.choice,null);
+});
+
+test('a visible calendar rechecks automatically before previews expire without clearing a valid choice',async()=>{
+  const f=fixture({allDates:true});f.context.document.visibilityState='visible';await f.context.loadMonth();
+  f.context.state.choice=f.context.state.availability.candidates[0];f.advance(60_000);
+  await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(f.calls.length,2);assert.equal(f.context.state.availability.date,'2026-10-09');
+  assert.ok(f.context.state.choice);assert.equal(f.context.state.availabilityCache.get(JSON.stringify(['2026-10-09',30,'Europe/Rome'])).validUntil,181_000);
+});
+test('opening booking details stops preview timers and ignores an in-flight recheck',async()=>{
+  const f=fixture({allDates:true});await f.context.loadMonth();
+  const showDetails=source.slice(source.indexOf('function showDetails(slot)'),source.indexOf('function showCalendar()'));
+  f.context.fullDateTime=()=> 'Synthetic selected time';
+  f.context.$('guest-name').focus=()=>{};
+  vm.runInContext(showDetails,f.context);
+  const requestId=f.context.state.availabilityRequest,choice=f.context.state.availability.candidates[0];
+  f.context.showDetails(choice);f.advance(120_000);
+  assert.equal(f.context.state.choice.start,choice.start,'Entering details preserves the proposed booking time');
+  assert.ok(f.context.state.availabilityRequest>requestId,'Earlier preview responses cannot interrupt details');
 });

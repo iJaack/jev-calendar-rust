@@ -102,8 +102,16 @@ function cacheAvailability(key, value, startedAt) {
   state.availabilityCache.set(key, entry);
   return entry;
 }
-function expireAvailability(key, entry, requestId) {
+function clearAvailabilityTimers() {
   clearTimeout(state.availabilityExpiry);
+  clearTimeout(state.availabilityRecheck);
+}
+function expireAvailability(key, entry, requestId) {
+  clearAvailabilityTimers();
+  state.availabilityRecheck = setTimeout(() => {
+    if (document.visibilityState !== 'visible' || state.availabilityCache.get(key) !== entry || requestId !== state.availabilityRequest) return;
+    selectDate(state.selectedDate, true);
+  }, Math.max(5_000, Math.min(60_000, entry.validUntil - performance.now() - 5_000)));
   state.availabilityExpiry = setTimeout(() => {
     if (state.availabilityCache.get(key) !== entry || requestId !== state.availabilityRequest) return;
     state.availabilityCache.delete(key);
@@ -122,7 +130,7 @@ function availabilityKey(date) {
 async function loadMonth(preferredDate = null) {
   const requestId = ++state.monthRequest;
   const startedAt = performance.now();
-  clearTimeout(state.availabilityExpiry);
+  clearAvailabilityTimers();
   state.availabilityCache.clear();
   ++state.availabilityRequest;
   state.availableDates = null; state.recommendedDate = null; state.selectedDate = null; state.choice = null; state.availability = null;
@@ -165,23 +173,23 @@ async function loadMonth(preferredDate = null) {
   }
 }
 
-async function selectDate(date) {
+async function selectDate(date, preserveChoice = false) {
   if (!state.availableDates?.has(date)) return;
   const requestId = ++state.availabilityRequest;
   const startedAt = performance.now();
   const key = availabilityKey(date);
   const cached = state.availabilityCache.get(key);
   const recent = cached?.validUntil > startedAt;
-  clearTimeout(state.availabilityExpiry);
+  clearAvailabilityTimers();
   setStatus($('availability-status'));
-  state.selectedDate = date; state.choice = null; state.availability = recent ? cached.value : null; renderCalendar();
+  state.selectedDate = date; if (!preserveChoice) state.choice = null; state.availability = recent ? cached.value : null; renderCalendar();
   $('times-date').textContent = dayLabel(date);
   if (recent) {
     $('viewer-timezone').value = cached.value.viewerTimeZone;
     $('host-timezone').textContent = zoneLabel(cached.value.hostTimezone);
     renderSlots();
     expireAvailability(key, cached, requestId);
-    if (cached.expiresAt > startedAt) return;
+    if (cached.expiresAt > startedAt && !preserveChoice) return;
   } else {
     $('slots').innerHTML = '<div class="loading-times"><i></i><i></i><i></i></div>';
   }
@@ -218,7 +226,7 @@ async function selectDate(date) {
   } catch (error) {
     if (requestId !== state.availabilityRequest) return;
     if (error.invalidatePreview) {
-      clearTimeout(state.availabilityExpiry);
+      clearAvailabilityTimers();
       state.availabilityCache.clear();
       state.choice = null;
       showCalendar();
@@ -266,6 +274,8 @@ function activateTime(row, slot) {
 }
 
 function showDetails(slot) {
+  clearAvailabilityTimers();
+  ++state.availabilityRequest;
   state.choice = slot;
   $('date-step').classList.add('hidden');
   $('details-step').classList.remove('hidden');
@@ -292,7 +302,10 @@ document.querySelectorAll('.duration-option').forEach((button) => button.addEven
 $('previous-month').addEventListener('click', () => { state.visibleMonth = new Date(state.visibleMonth.getFullYear(), state.visibleMonth.getMonth() - 1, 1, 12); loadMonth(); });
 $('next-month').addEventListener('click', () => { state.visibleMonth = new Date(state.visibleMonth.getFullYear(), state.visibleMonth.getMonth() + 1, 1, 12); loadMonth(); });
 $('retry-dates').addEventListener('click', () => loadMonth(state.selectedDate));
-$('back-to-calendar').addEventListener('click', showCalendar);
+$('back-to-calendar').addEventListener('click', () => { showCalendar(); selectDate(state.selectedDate); });
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible' && !$('date-step').classList.contains('hidden')) selectDate(state.selectedDate, true);
+});
 $('viewer-timezone').addEventListener('change', () => {
   const preferredDate = state.selectedDate;
   state.viewerTimeZone = $('viewer-timezone').value;
@@ -320,7 +333,7 @@ $('booking-form').addEventListener('submit', async (event) => {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ ...bookingInput, idempotencyKey: state.bookingAttempt.key }),
     });
-    clearTimeout(state.availabilityExpiry);
+    clearAvailabilityTimers();
     $('details-step').classList.add('hidden'); $('success-step').classList.remove('hidden');
     $('confirmed-title').textContent = result.booking.meetingTitle || '';
     $('success-summary').innerHTML = `<strong>${fullDateTime(state.choice.start)}</strong><span>${state.durationMinutes} min · Google Meet · ${zoneLabel(state.viewerTimeZone)}</span>`;
