@@ -408,8 +408,9 @@ impl App {
         let mut dates = vec![];
         let mut preferences = vec![];
         let mut partial = false;
+        let mut route_limited = false;
         for day in days {
-            if partial && let Some(snapshot) = &snapshot {
+            if route_limited && let Some(snapshot) = &snapshot {
                 let first = s::date(s::zoned(&day, 0.0, &viewer)?, &zone)?;
                 let last = s::date(s::zoned(&day, 24.0, &viewer)? - 1, &zone)?;
                 let a = iso(s::zoned(&first, 0.0, &zone)?);
@@ -432,6 +433,11 @@ impl App {
             let avail = match avail {
                 Ok(v) => v,
                 Err(e) if e.to_string() == "Google Routes failed (429)" => {
+                    partial = true;
+                    route_limited = true;
+                    continue;
+                }
+                Err(e) if e.to_string() == "Google Routes returned no duration" => {
                     partial = true;
                     continue;
                 }

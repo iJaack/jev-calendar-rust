@@ -773,8 +773,9 @@ impl Providers {
         let v: Value = r.json().await?;
         let route = &v["routes"][0];
         let seconds = text(route, "duration")
-            .trim_end_matches('s')
-            .parse::<f64>()?;
+            .strip_suffix('s')
+            .and_then(|duration| duration.parse::<f64>().ok())
+            .ok_or_else(|| anyhow!("Google Routes returned no duration"))?;
         ensure!(
             seconds.is_finite() && seconds >= 0.0,
             "Google Routes returned no duration"

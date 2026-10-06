@@ -12,7 +12,7 @@ import { GOOGLE_SCOPES } from '../reference/lib/google-accounts.js';
 const root=new URL('..',import.meta.url).pathname;
 const binary=new URL('../target/debug/jev-calendar',import.meta.url).pathname;
 async function port(){const s=createServer().listen(0,'127.0.0.1');await once(s,'listening');const p=s.address().port;await new Promise(r=>s.close(r));return p;}
-async function fixture(t,{travel=false}={}){
+async function fixture(t,{travel=false,travelDates=['2030-10-07']}={}){
  const dir=mkdtempSync(join(tmpdir(),'jev-rust-provider-')),path=join(dir,'fixture.sqlite'),store=new SqliteStore({path,encryptionSecret:'synthetic-key'});
  const token={access_token:'owner-token',refresh_token:'synthetic-refresh',scope:GOOGLE_SCOPES,expires_at:Date.now()+3600_000};store.connectGoogle('owner@example.test',token);const session=store.newSession();
  store.putSetting('settings',{timezone:'Europe/Rome',hours:{start:9,end:18},baseLocation:travel?'Synthetic Base Street 1':'',minimumBookingNoticeMinutes:0,minimumTravelBufferMinutes:10});
@@ -24,8 +24,8 @@ async function fixture(t,{travel=false}={}){
   if(url.pathname==='/calendar/v3/freeBusy'){const calendars={};for(const item of body.items){if(state.missingCalendar&&item.id==='shared-0')continue;calendars[item.id]={busy:item.id==='shared-0'?[{start:'2030-10-07T07:00:00.000Z',end:'2030-10-07T08:00:00.000Z'}]:[]};}return send(200,{calendars});}
   if(url.pathname==='/calendar/v3/calendars/primary/events'&&req.method==='POST'){if(state.createGate)await state.createGate;state.creationCount++;assert.match(body.id,/^[0-9a-v]{5,1024}$/);if(state.events.has(body.id))return send(409,{error:'duplicate'});const event={...body,id:body.id,etag:'revision-0',hangoutLink:'https://meet.google.com/synthetic'};state.events.set(body.id,event);if(state.loseCreate){state.loseCreate=false;state.loseGet=true;req.socket.destroy();return;}return send(200,event);}
   if(url.pathname.startsWith('/calendar/v3/calendars/primary/events/')){const id=decodeURIComponent(url.pathname.split('/').at(-1)),event=state.events.get(id);if(req.method==='GET'){if(state.loseGet){state.loseGet=false;return send(503,{error:'readback unavailable'});}return event?send(200,event):send(404,{});}if(!event)return send(404,{});if(req.headers['if-match']!==event.etag)return send(412,{});state.updateCount++;if(req.method==='DELETE'){state.events.set(id,{id,status:'cancelled'});if(state.loseCancel){state.loseCancel=false;req.socket.destroy();return;}return send(204,null);}const moved={...event,...body,etag:'revision-'+state.updateCount};state.events.set(id,moved);return send(200,moved);}
-  if(/\/calendar\/v3\/calendars\/.+\/events$/.test(url.pathname)){const id=decodeURIComponent(url.pathname.split('/').at(-2));return send(200,{items:travel&&id==='shared-2'?[{start:{dateTime:'2030-10-07T10:00:00.000Z'},end:{dateTime:'2030-10-07T11:00:00.000Z'},location:'Synthetic Event Street 2',summary:'Team1 [meeting]',status:'confirmed'}]:[]});}
-  if(url.pathname==='/routes'){if(state.routeLimit||(state.routeWalkFail&&body.travelMode==='WALK'))return send(429,{});return send(200,{routes:[{duration:body.travelMode==='WALK'?'300s':'600s',distanceMeters:1000}]});}
+  if(/\/calendar\/v3\/calendars\/.+\/events$/.test(url.pathname)){const id=decodeURIComponent(url.pathname.split('/').at(-2));return send(200,{items:travel&&id==='shared-2'?travelDates.map(date=>({start:{dateTime:date+'T10:00:00.000Z'},end:{dateTime:date+'T11:00:00.000Z'},location:'Synthetic Event Street 2',summary:'Team1 [meeting]',status:'confirmed'})):[]});}
+  if(url.pathname==='/routes'){if(state.routeLimit||(state.routeWalkFail&&body.travelMode==='WALK'))return send(429,{});if(state.routeReply)return send(200,state.routeReply(body));return send(200,{routes:[{duration:body.travelMode==='WALK'?'300s':'600s',distanceMeters:1000}]});}
   if(url.pathname==='/jev'){const answers={};for(const[key,q]of Object.entries(body.questions)){const choices=Object.keys(q.criteria),choice=key==='travel_mode'?'WALK':key==='extra_buffer'?'MIN_5':key==='booking_notice'?'BASE':'cluster_meetings';answers[key]={type:'choice',choice,confidence:state.jevLow?.2:.9,probabilities:Object.fromEntries(choices.map(c=>[c,c===choice?1:0]))};}return send(200,{model:'jev-1.13.0',answers});}
   if(url.pathname==='/photon')return send(200,{features:[{properties:{osm_type:'N',osm_id:42,street:'Synthetic Street',housenumber:'1',city:'Rome',country:'Italy'},geometry:{coordinates:[12.5,41.9]}}]});
   return send(404,{});
@@ -49,3 +49,46 @@ test('SIGTERM drains an in-flight Google creation before exiting',async t=>{cons
 
 test('low confidence and alternate route rejection retain authoritative DRIVE fallback',async t=>{const f=await fixture(t,{travel:true});const input={date:'2030-10-07',viewerTimeZone:'Europe/Rome',durationMinutes:30};f.state.jevLow=true;let r=await f.api('/api/availability',input);assert.equal(r.status,200);let v=await r.json();assert.equal(v.travel.adviceSource,'fallback');assert.equal(v.travel.maximumBufferMinutes,20);f.state.jevLow=false;f.state.routeWalkFail=true;r=await f.api('/api/availability',input);assert.equal(r.status,200);v=await r.json();assert.equal(v.travel.adviceSource,'fallback');assert.equal(v.travel.maximumBufferMinutes,20);});
 test('expired or tampered management capability fails before provider access',async t=>{const f=await fixture(t);const key='synthetic-expired-booking';f.store.db.prepare("INSERT INTO bookings (idempotency_key,start,end,buffer_minutes,status,event_id,created_at) VALUES (?,?,?,?,?,?,?)").run(key,'2020-10-07T07:00:00Z','2020-10-07T07:30:00Z',10,'confirmed','synthetic-expired-id','2020-10-01T00:00:00Z');const token=new BookingLinks({secret:'synthetic-key',publicOrigin:'https://book.example.test'}).token(key);const before=f.state.calls.filter(c=>c.path.includes('synthetic-expired-id')).length;let r=await f.api('/api/booking/view',{token});assert.equal(r.status,400);assert.match((await r.json()).error,/no longer available/);r=await f.api('/api/booking/view',{token:token.slice(0,-1)+'!'});assert.equal(r.status,400);assert.match((await r.json()).error,/invalid/);assert.equal(f.state.calls.filter(c=>c.path.includes('synthetic-expired-id')).length,before);});
+
+
+test('missing or invalid route durations never become zero travel and do not erase the month', async t => {
+  const first = new Date();
+  first.setUTCHours(0, 0, 0, 0);
+  first.setUTCDate(first.getUTCDate() + ((8 - first.getUTCDay()) % 7 || 7));
+  const second = new Date(first);
+  second.setUTCDate(second.getUTCDate() + 1);
+  if (first.getUTCMonth() !== second.getUTCMonth()) {
+    first.setUTCDate(first.getUTCDate() + 7);
+    second.setUTCDate(second.getUTCDate() + 7);
+  }
+  const badDate = first.toISOString().slice(0, 10);
+  const goodDate = second.toISOString().slice(0, 10);
+  const f = await fixture(t, {travel: true, travelDates: [badDate, goodDate]});
+  const input = {date: badDate, viewerTimeZone: 'Europe/Rome', durationMinutes: 30};
+  for (const reply of [{}, {routes: []}, {routes: [{}]},
+      {routes: [{duration: ''}]}, {routes: [{duration: 'invalids'}]},
+      {routes: [{duration: '-1s'}]}, {routes: [{duration: 'NaNs'}]}]) {
+    f.state.routeReply = () => reply;
+    const response = await f.api('/api/availability', input);
+    assert.equal(response.status, 400);
+    assert.equal((await response.json()).error, 'Google Routes returned no duration');
+  }
+  for (const duration of ['0s', '0.125s']) {
+    f.state.routeReply = () => ({routes: [{duration, distanceMeters: 0}]});
+    const response = await f.api('/api/availability', input);
+    assert.equal(response.status, 200, await response.clone().text());
+    assert.ok((await response.json()).candidates.length);
+  }
+  f.state.routeReply = body => body.departureTime?.startsWith(badDate)
+    ? {routes: []} : {routes: [{duration: '600s', distanceMeters: 1000}]};
+  const response = await f.api('/api/available-dates', {
+    month: badDate.slice(0, 7), viewerTimeZone: 'Europe/Rome', durationMinutes: 30
+  });
+  assert.equal(response.status, 200, await response.clone().text());
+  const month = await response.json();
+  assert.equal(month.partial, true);
+  assert.ok(!month.dates.includes(badDate));
+  assert.ok(month.dates.includes(goodDate), 'Another in-person day must still be checked');
+  assert.ok(f.state.calls.some(call => call.path === '/routes'
+    && call.body.departureTime?.startsWith(goodDate)));
+});
