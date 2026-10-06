@@ -17,9 +17,23 @@ use serde_json::{Value, json};
 use std::{
     collections::HashMap,
     sync::{Arc, Mutex},
-    time::Duration,
+    time::{Duration, Instant},
 };
 use subtle::ConstantTimeEq;
+
+const CALENDAR_REFRESH_MS: u64 = 60_000;
+const PREVIEW_MAX_AGE_MS: u64 = 120_000;
+
+struct CalendarSnapshot {
+    value: Value,
+    fingerprint: String,
+    started: Instant,
+}
+#[derive(Default)]
+struct PreviewState {
+    snapshot: Option<CalendarSnapshot>,
+    generation: u64,
+}
 
 const WORKLOAD_REFRESH_MS: i64 = 6 * 60 * 60 * 1000;
 
@@ -40,6 +54,8 @@ pub struct App {
     pub origin: String,
     pub operations: tokio::sync::Mutex<()>,
     refresh: tokio::sync::Mutex<()>,
+    previews: Mutex<PreviewState>,
+    preview_changed: tokio::sync::Notify,
     pub(crate) demo_state: Mutex<Value>,
     limits: Mutex<HashMap<String, (i64, u32)>>,
 }
@@ -202,6 +218,121 @@ impl App {
             self.providers.events(c, start, end, true)
         )
     }
+    fn preview_max_age_ms(&self) -> u64 {
+        if self.env("JEV_TEST_MODE") == "true" && self.env("JEV_ALLOW_LIVE_STATE") != "1" {
+            self.env("JEV_TEST_PREVIEW_MAX_AGE_MS")
+                .parse::<u64>()
+                .unwrap_or(PREVIEW_MAX_AGE_MS)
+                .clamp(100, PREVIEW_MAX_AGE_MS)
+        } else {
+            PREVIEW_MAX_AGE_MS
+        }
+    }
+    fn preview_fingerprint(&self) -> Result<String> {
+        let settings = self.settings()?;
+        Ok(crate::canonical(&json!([
+            self.db.accounts()?,
+            self.db.setting("googleBookingAccountId", Value::Null)?,
+            settings["timezone"],
+            settings["timezoneSource"],
+            settings["timezoneUpdatedAt"]
+        ]))
+        .to_string())
+    }
+    fn invalidate_preview(&self) {
+        if let Ok(mut state) = self.previews.lock() {
+            state.generation += 1;
+            state.snapshot = None;
+        }
+        self.preview_changed.notify_one();
+    }
+    async fn refresh_preview(&self) -> Result<()> {
+        let generation = self
+            .previews
+            .lock()
+            .map_err(|_| anyhow!("Calendar snapshot unavailable"))?
+            .generation;
+        let started = Instant::now();
+        let calendar = self.providers.calendar()?;
+        let settings = self.settings()?;
+        let host = self.host(&settings, Some(&calendar)).await?;
+        let fingerprint = self.preview_fingerprint()?;
+        let zone = text(&host, "timezone");
+        let today = s::date(now(), &zone)?;
+        // Include adjacent viewer days and full weekly workload context for the 90-day horizon.
+        let start = iso(s::zoned(&s::monday(&s::shift(&today, -2)?)?, 0.0, &zone)?);
+        let end = iso(s::zoned(&s::shift(&today, 110)?, 0.0, &zone)?);
+        let (busy, events) = self.calendar_data(Some(&calendar), &start, &end).await?;
+        ensure!(
+            fingerprint == self.preview_fingerprint()?,
+            "Calendar configuration changed during refresh"
+        );
+        ensure!(
+            started.elapsed().as_millis() < PREVIEW_MAX_AGE_MS as u128,
+            "Calendar refresh took too long"
+        );
+        let mut state = self
+            .previews
+            .lock()
+            .map_err(|_| anyhow!("Calendar snapshot unavailable"))?;
+        ensure!(
+            generation == state.generation,
+            "Calendar changed during refresh"
+        );
+        state.snapshot = Some(CalendarSnapshot {
+            value: json!({"host":host,"busy":busy,"events":events,"start":start,"end":end}),
+            fingerprint,
+            started,
+        });
+        Ok(())
+    }
+    fn preview_snapshot(&self) -> Result<Value> {
+        let fingerprint = self.preview_fingerprint()?;
+        let state = self
+            .previews
+            .lock()
+            .map_err(|_| anyhow!("Calendar snapshot unavailable"))?;
+        let saved = state
+            .snapshot
+            .as_ref()
+            .ok_or_else(|| anyhow!("Calendar is refreshing. Please try again shortly."))?;
+        let age = saved.started.elapsed().as_millis() as u64;
+        ensure!(
+            age < self.preview_max_age_ms() && saved.fingerprint == fingerprint,
+            "Calendar is refreshing. Please try again shortly."
+        );
+        let mut snapshot = saved.value.clone();
+        snapshot["settings"] = self.settings()?;
+        snapshot["rules"] = json!(self.rules()?);
+        snapshot["feedback"] = json!(self.db.feedback()?);
+        snapshot["snapshotAgeMs"] = json!(age);
+        snapshot["previewMaxAgeMs"] = json!(self.preview_max_age_ms());
+        Ok(snapshot)
+    }
+    async fn preview_availability(&self, input: &Value) -> Result<Value> {
+        if self.demo {
+            return self.availability(input, None, None, 12).await;
+        }
+        let settings = self.settings()?;
+        let viewer = if s::valid_zone(&text(input, "viewerTimeZone")) {
+            text(input, "viewerTimeZone")
+        } else {
+            text(&settings, "timezone")
+        };
+        let day = text(input, "date");
+        // Preserve explicit-date reads outside the public page's 90-day horizon.
+        if !day.is_empty() {
+            let today = s::date(now(), &viewer)?;
+            if day < today || day > s::shift(&today, 90)? {
+                return self.availability(input, None, None, 12).await;
+            }
+        }
+        let snapshot = self.preview_snapshot()?;
+        let mut result = self.availability(input, None, Some(&snapshot), 12).await?;
+        result["snapshotAgeMs"] = snapshot["snapshotAgeMs"].clone();
+        result["previewMaxAgeMs"] = snapshot["previewMaxAgeMs"].clone();
+        Ok(result)
+    }
     pub async fn availability(
         &self,
         input: &Value,
@@ -209,7 +340,7 @@ impl App {
         snapshot: Option<&Value>,
         limit: usize,
     ) -> Result<Value> {
-        let owned = if !self.demo && calendar.is_none() {
+        let owned = if !self.demo && calendar.is_none() && snapshot.is_none() {
             Some(self.providers.calendar()?)
         } else {
             None
@@ -353,13 +484,17 @@ impl App {
                 .is_match(&month),
             "Invalid month"
         );
-        let calendar = if self.demo {
+        let snapshot = if self.demo {
             None
         } else {
-            Some(self.providers.calendar()?)
+            Some(self.preview_snapshot()?)
         };
         let settings = self.settings()?;
-        let host = self.host(&settings, calendar.as_ref()).await?;
+        let host = if let Some(snapshot) = &snapshot {
+            snapshot["host"].clone()
+        } else {
+            self.host(&settings, None).await?
+        };
         let zone = text(&host, "timezone");
         let viewer = if s::valid_zone(&text(input, "viewerTimeZone")) {
             text(input, "viewerTimeZone")
@@ -385,34 +520,23 @@ impl App {
             return Ok(result);
         }
         let rules = self.rules()?;
-        let snapshot = if self.demo {
-            None
-        } else {
-            let first = s::date(s::zoned(&days[0], 0.0, &viewer)?, &zone)?;
-            let last = s::date(
-                s::zoned(days.last().expect("nonempty"), 24.0, &viewer)? - 1,
-                &zone,
-            )?;
-            let start = iso(s::zoned(&s::monday(&first)?, 0.0, &zone)?);
-            let end = iso(s::zoned(&s::shift(&s::monday(&last)?, 12)?, 0.0, &zone)?);
-            let (busy, events) = self.calendar_data(calendar.as_ref(), &start, &end).await?;
-            Some(
-                json!({"settings":settings,"host":host,"busy":busy,"events":events,"feedback":self.db.feedback()?,"rules":rules}),
-            )
-        };
         let mut dates = vec![];
         let mut preferences = vec![];
         let mut first_availability = Value::Null;
         let mut availability_by_date = serde_json::Map::new();
         for day in days {
-            let avail = self
+            let mut avail = self
                 .availability(
                     &json!({"date": day, "durationMinutes": duration, "viewerTimeZone": viewer}),
-                    calendar.as_ref(),
+                    None,
                     snapshot.as_ref(),
                     12,
                 )
                 .await?;
+            if let Some(snapshot) = &snapshot {
+                avail["snapshotAgeMs"] = snapshot["snapshotAgeMs"].clone();
+                avail["previewMaxAgeMs"] = snapshot["previewMaxAgeMs"].clone();
+            }
             if !array(&avail["candidates"]).is_empty() {
                 let date = s::date(
                     epoch(&text(&avail["candidates"][0], "start"))
@@ -896,10 +1020,7 @@ impl App {
             ));
         }
         if method == Method::POST && path == "/api/availability" {
-            return Ok(response(
-                200,
-                self.availability(input, None, None, 12).await?,
-            ));
+            return Ok(response(200, self.preview_availability(input).await?));
         }
         if method == Method::POST && path == "/api/available-dates" {
             return Ok(response(200, self.dates(input).await?));
@@ -1081,8 +1202,24 @@ async fn private_handler(State(app): State<Arc<App>>, request: Request<Body>) ->
     };
     let mut r = match app.route(&method, &path, &query, &headers, &input).await {
         Ok(r) => r,
-        Err(e) => error(400, &e.to_string()),
+        Err(e) => {
+            if path == "/api/availability" || path == "/api/available-dates" {
+                response(400, json!({"error":e.to_string(),"invalidatePreview":true}))
+            } else {
+                error(400, &e.to_string())
+            }
+        }
     };
+    let changes_calendar = path == "/api/book"
+        || path == "/api/booking/change"
+        || (method == Method::POST && path.starts_with("/api/integrations/jaack-os/bookings/"));
+    let changes_configuration =
+        (method == Method::DELETE || method == Method::PUT || path == "/auth/google/callback")
+            && r.status().is_success()
+            || path == "/auth/google/callback" && r.status().is_redirection();
+    if !app.demo && (changes_calendar || changes_configuration) {
+        app.invalidate_preview();
+    }
     r.headers_mut()
         .insert("X-Jev-Backend", "rust".parse().expect("valid header"));
     r
@@ -1352,11 +1489,22 @@ pub async fn run() -> Result<()> {
         origin,
         operations: tokio::sync::Mutex::new(()),
         refresh: tokio::sync::Mutex::new(()),
+        previews: Mutex::new(PreviewState::default()),
+        preview_changed: tokio::sync::Notify::new(),
         demo_state: Mutex::new(state),
         limits: Mutex::new(HashMap::new()),
     });
     if !public && !demo {
         app.providers.migrate().await?;
+        let started = Instant::now();
+        if app.refresh_preview().await.is_err() {
+            eprintln!("Initial calendar snapshot unavailable; background refresh will retry");
+        } else {
+            eprintln!(
+                "Initial calendar snapshot ready in {} ms",
+                started.elapsed().as_millis()
+            );
+        }
     }
     let listener = tokio::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, port)).await?;
     let router = if public {
@@ -1386,6 +1534,35 @@ pub async fn run() -> Result<()> {
     } else {
         None
     };
+    let calendar_background = if !public && !demo {
+        let app = app.clone();
+        Some(tokio::spawn(async move {
+            let interval =
+                if app.env("JEV_TEST_MODE") == "true" && app.env("JEV_ALLOW_LIVE_STATE") != "1" {
+                    app.env("JEV_TEST_CALENDAR_REFRESH_MS")
+                        .parse::<u64>()
+                        .unwrap_or(CALENDAR_REFRESH_MS)
+                        .max(50)
+                } else {
+                    CALENDAR_REFRESH_MS
+                };
+            let duration = Duration::from_millis(interval);
+            let mut timer =
+                tokio::time::interval_at(tokio::time::Instant::now() + duration, duration);
+            timer.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+            loop {
+                tokio::select! {
+                    _ = timer.tick() => {},
+                    _ = app.preview_changed.notified() => {},
+                }
+                if app.refresh_preview().await.is_err() {
+                    eprintln!("Background calendar snapshot refresh failed");
+                }
+            }
+        }))
+    } else {
+        None
+    };
     println!(
         "Jev Calendar Rust listening at {base} ({})",
         if demo { "demo" } else { "Google" }
@@ -1394,6 +1571,9 @@ pub async fn run() -> Result<()> {
         .with_graceful_shutdown(shutdown())
         .await;
     if let Some(task) = background {
+        task.abort();
+    }
+    if let Some(task) = calendar_background {
         task.abort();
     }
     result?;

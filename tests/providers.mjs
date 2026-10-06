@@ -12,7 +12,7 @@ import { GOOGLE_SCOPES } from '../reference/lib/google-accounts.js';
 const root=new URL('..',import.meta.url).pathname;
 const binary=new URL('../target/debug/jev-calendar',import.meta.url).pathname;
 async function port(){const s=createServer().listen(0,'127.0.0.1');await once(s,'listening');const p=s.address().port;await new Promise(r=>s.close(r));return p;}
-async function fixture(t,{travel=false,travelDates=['2030-10-07'],learningAgeMs=0,jevLow=false}={}){
+async function fixture(t,{travel=false,travelDates=['2030-10-07'],learningAgeMs=0,jevLow=false,calendarRefreshMs=60_000,previewMaxAgeMs=120_000}={}){
  const dir=mkdtempSync(join(tmpdir(),'jev-rust-provider-')),path=join(dir,'fixture.sqlite'),store=new SqliteStore({path,encryptionSecret:'synthetic-key'});
  const token={access_token:'owner-token',refresh_token:'synthetic-refresh',scope:GOOGLE_SCOPES,expires_at:Date.now()+3600_000};store.connectGoogle('owner@example.test',token);const session=store.newSession();
  store.putSetting('settings',{timezone:'Europe/Rome',hours:{start:9,end:18},baseLocation:travel?'Synthetic Base Street 1':'',minimumBookingNoticeMinutes:0,minimumTravelBufferMinutes:10});
@@ -32,7 +32,7 @@ async function fixture(t,{travel=false,travelDates=['2030-10-07'],learningAgeMs=
   if(url.pathname==='/photon')return send(200,{features:[{properties:{osm_type:'N',osm_id:42,street:'Synthetic Street',housenumber:'1',city:'Rome',country:'Italy'},geometry:{coordinates:[12.5,41.9]}}]});
   return send(404,{});
  }).listen(0,'127.0.0.1');await once(provider,'listening');const providerOrigin=`http://127.0.0.1:${provider.address().port}`;const p=await port(),origin=`http://127.0.0.1:${p}`;
- const processOptions={cwd:root+'reference',env:{PATH:process.env.PATH,PORT:String(p),DATABASE_PATH:path,APP_ENCRYPTION_KEY:'synthetic-key',DEMO_MODE:'false',APP_BASE_URL:origin,GOOGLE_CLIENT_ID:'synthetic-client',GOOGLE_CLIENT_SECRET:'synthetic-secret',GOOGLE_ROUTES_API_KEY:'synthetic-routes',TYPESAFE_API_KEY:'synthetic-jev',JEV_TEST_MODE:'true',JEV_TEST_PROVIDER_ORIGIN:providerOrigin},stdio:['ignore','pipe','pipe']};let child=spawn(binary,['--private'],processOptions);let logs='';child.stderr.on('data',d=>logs+=d);await Promise.race([once(child.stdout,'data'),once(child,'exit').then(()=>{throw Error('Failed startup: '+logs)})]);
+ const processOptions={cwd:root+'reference',env:{PATH:process.env.PATH,PORT:String(p),DATABASE_PATH:path,APP_ENCRYPTION_KEY:'synthetic-key',DEMO_MODE:'false',APP_BASE_URL:origin,GOOGLE_CLIENT_ID:'synthetic-client',GOOGLE_CLIENT_SECRET:'synthetic-secret',GOOGLE_ROUTES_API_KEY:'synthetic-routes',TYPESAFE_API_KEY:'synthetic-jev',JEV_TEST_MODE:'true',JEV_TEST_CALENDAR_REFRESH_MS:String(calendarRefreshMs),JEV_TEST_PREVIEW_MAX_AGE_MS:String(previewMaxAgeMs),JEV_TEST_PROVIDER_ORIGIN:providerOrigin},stdio:['ignore','pipe','pipe']};let child=spawn(binary,['--private'],processOptions);let logs='';child.stderr.on('data',d=>logs+=d);await Promise.race([once(child.stdout,'data'),once(child,'exit').then(()=>{throw Error('Failed startup: '+logs)})]);
  t.after(async()=>{if(child.exitCode===null){child.kill();await once(child,'exit');}provider.closeAllConnections();await new Promise(r=>provider.close(r));store.db.close();rmSync(dir,{recursive:true,force:true});});
  const api=(path,body,headers={})=>fetch(origin+path,{method:body===undefined?'GET':'POST',headers:{'Content-Type':'application/json',...headers},...(body!==undefined?{body:JSON.stringify(body)}:{}),redirect:'manual'});
  const owner={Cookie:`jev_session=${session}`,Origin:origin,'X-Jev-Owner':'1'};
@@ -120,4 +120,41 @@ test('month results include every eligible day and booking still rejects newly o
     assert.equal(f.state.creationCount,0);
   }
   assert.ok(f.state.calls.every(call=>call.path!=='/routes'&&call.path!=='/jev'));
+});
+
+async function currentPreview(f) {
+  const response=await f.api('/api/available-dates',{month:new Date().toISOString().slice(0,7),durationMinutes:30,viewerTimeZone:'Europe/Rome'});
+  assert.equal(response.status,200,await response.clone().text());return response.json();
+}
+test('a shared snapshot serves concurrent visits without Google or Jev reads',async t=>{
+  const f=await fixture(t);const month=await currentPreview(f);const before=f.state.calls.length;
+  const values=await Promise.all(Array.from({length:8},()=>f.api('/api/availability',{date:month.dates[0],durationMinutes:30,viewerTimeZone:'Europe/Rome'}).then(async r=>{assert.equal(r.status,200);return r.json();})));
+  assert.equal(f.state.calls.length,before);assert.ok(values.every(v=>v.snapshotAgeMs>=0&&v.previewMaxAgeMs===120_000));
+  assert.ok(!JSON.stringify(values).includes('Synthetic'));
+});
+test('background calendar refresh discovers conflicts independently of visits',async t=>{
+  const f=await fixture(t,{calendarRefreshMs:150});const month=await currentPreview(f),date=month.dates[0],slot=month.firstDateAvailability.candidates[0];
+  f.state.extraBusy=slot;const before=f.state.calls.filter(c=>c.path.endsWith('freeBusy')).length;
+  for(let i=0;i<100&&f.state.calls.filter(c=>c.path.endsWith('freeBusy')).length===before;i++)await new Promise(r=>setTimeout(r,20));
+  await new Promise(r=>setTimeout(r,80));
+  const response=await f.api('/api/availability',{date,viewerTimeZone:'Europe/Rome'});assert.equal(response.status,200);const value=await response.json();
+  assert.ok(!value.candidates.some(c=>c.start===slot.start));assert.equal(f.state.creationCount,0);
+  assert.ok(f.state.calls.every(c=>c.path!=='/routes'&&c.path!=='/jev'));
+});
+test('failed background refresh retains bounded previews then fails closed',async t=>{
+  const f=await fixture(t,{calendarRefreshMs:100,previewMaxAgeMs:500});const month=await currentPreview(f);
+  f.state.missingCalendar=true;await new Promise(r=>setTimeout(r,200));
+  let response=await f.api('/api/availability',{date:month.dates[0]});assert.equal(response.status,200);
+  await new Promise(r=>setTimeout(r,350));response=await f.api('/api/availability',{date:month.dates[0]});assert.equal(response.status,400);
+  assert.match((await response.json()).error,/refreshing/);
+  f.state.missingCalendar=false;await new Promise(r=>setTimeout(r,250));response=await f.api('/api/availability',{date:month.dates[0]});assert.equal(response.status,200);
+});
+test('replaced accounts invalidate snapshots while policy changes apply immediately',async t=>{
+  const f=await fixture(t);const month=await currentPreview(f),date=month.dates[0];
+  const before=f.state.calls.length;
+  f.store.putSetting('settings',{...f.store.getSetting('settings'),minimumBookingNoticeMinutes:10080});
+  let response=await f.api('/api/availability',{date});assert.equal(response.status,200);assert.equal((await response.json()).candidates.length,0);
+  assert.equal(f.state.calls.length,before);
+  const account=f.store.googleAccount('owner@example.test');f.store.connectGoogle(account.id,account.token);
+  response=await f.api('/api/availability',{date});assert.equal(response.status,400);assert.match((await response.json()).error,/refreshing/);
 });

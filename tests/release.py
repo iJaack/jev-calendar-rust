@@ -51,6 +51,15 @@ class Recovery(unittest.TestCase):
                 with self.assertRaisesRegex(RuntimeError, 'Release checksum failed'):
                     release.verify(package)
 
+    def test_readback_allows_initial_calendar_warmup(self):
+        def healthy():
+            value = BytesIO(b'{"ok":true}')
+            value.headers = {'X-Jev-Backend': 'rust'}
+            return value
+        replies = [OSError('warming')] * 120 + [healthy(), healthy()]
+        with patch.object(release.urllib.request, 'urlopen', side_effect=replies), patch.object(release.time, 'sleep'):
+            release.readback(True)
+
     def test_current_backend_checks_both_services_and_health(self):
         def response(rust, ok=True):
             value = BytesIO(json.dumps({'ok': ok}).encode())

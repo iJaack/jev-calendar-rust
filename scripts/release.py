@@ -105,7 +105,8 @@ def start(label):
 
 def readback(rust):
     for port in [3030, 3031]:
-        for _ in range(100):
+        deadline = time.monotonic() + 60
+        while time.monotonic() < deadline:
             try:
                 req = urllib.request.Request(f'http://127.0.0.1:{port}/health', headers={'Host': 'book.jaack.me'})
                 with urllib.request.urlopen(req, timeout=2) as r:

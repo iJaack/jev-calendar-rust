@@ -53,7 +53,7 @@ function fullDateTime(iso) { return new Intl.DateTimeFormat('en-US', { weekday: 
 async function request(path, options) {
   const response = await fetch(path, { ...options, headers: { ...(options?.headers || {}), 'X-Jev-Booking': '1' } });
   const data = await response.json();
-  if (!response.ok) throw new Error(data.error || 'Request failed');
+  if (!response.ok) throw Object.assign(new Error(data.error || 'Request failed'), {invalidatePreview: Boolean(data.invalidatePreview)});
   return data;
 }
 
@@ -94,6 +94,27 @@ function renderCalendar() {
 }
 
 const AVAILABILITY_CACHE_MS = 60_000;
+const AVAILABILITY_MAX_AGE_MS = 120_000;
+function cacheAvailability(key, value, startedAt) {
+  const sourceAge = Math.max(0, Number(value.snapshotAgeMs) || 0);
+  const maxAge = Math.min(AVAILABILITY_MAX_AGE_MS, Number(value.previewMaxAgeMs) || AVAILABILITY_CACHE_MS);
+  const entry = {value, expiresAt: startedAt + Math.max(0, AVAILABILITY_CACHE_MS - sourceAge), validUntil: startedAt + Math.max(0, maxAge - sourceAge)};
+  state.availabilityCache.set(key, entry);
+  return entry;
+}
+function expireAvailability(key, entry, requestId) {
+  clearTimeout(state.availabilityExpiry);
+  state.availabilityExpiry = setTimeout(() => {
+    if (state.availabilityCache.get(key) !== entry || requestId !== state.availabilityRequest) return;
+    state.availabilityCache.delete(key);
+    state.availability = null;
+    state.choice = null;
+    $('slots').replaceChildren();
+    showCalendar();
+    setStatus($('availability-status'), 'Availability needs refreshing. Select a date to check again.');
+    $('retry-dates').classList.remove('hidden');
+  }, Math.max(0, entry.validUntil - performance.now()));
+}
 function availabilityKey(date) {
   return JSON.stringify([date, state.durationMinutes, state.viewerTimeZone]);
 }
@@ -101,6 +122,7 @@ function availabilityKey(date) {
 async function loadMonth(preferredDate = null) {
   const requestId = ++state.monthRequest;
   const startedAt = performance.now();
+  clearTimeout(state.availabilityExpiry);
   state.availabilityCache.clear();
   ++state.availabilityRequest;
   state.availableDates = null; state.recommendedDate = null; state.selectedDate = null; state.choice = null; state.availability = null;
@@ -119,7 +141,7 @@ async function loadMonth(preferredDate = null) {
     state.availableDates = new Set(result.dates);
     for (const date of result.dates) {
       const availability = result.availabilityByDate?.[date] || (result.firstDateAvailability?.date === date ? result.firstDateAvailability : null);
-      if (availability) state.availabilityCache.set(availabilityKey(date), {value: availability, expiresAt: startedAt + AVAILABILITY_CACHE_MS});
+      if (availability) cacheAvailability(availabilityKey(date), availability, startedAt);
     }
     state.recommendedDate = result.recommendedDate && state.availableDates.has(result.recommendedDate) ? result.recommendedDate : null;
     renderCalendar();
@@ -149,22 +171,39 @@ async function selectDate(date) {
   const startedAt = performance.now();
   const key = availabilityKey(date);
   const cached = state.availabilityCache.get(key);
-  const preparedAvailability = cached?.expiresAt > startedAt ? cached.value : null;
+  const recent = cached?.validUntil > startedAt;
+  clearTimeout(state.availabilityExpiry);
   setStatus($('availability-status'));
-  state.selectedDate = date; state.choice = null; state.availability = null; renderCalendar();
+  state.selectedDate = date; state.choice = null; state.availability = recent ? cached.value : null; renderCalendar();
   $('times-date').textContent = dayLabel(date);
-  $('slots').innerHTML = '<div class="loading-times"><i></i><i></i><i></i></div>';
+  if (recent) {
+    $('viewer-timezone').value = cached.value.viewerTimeZone;
+    $('host-timezone').textContent = zoneLabel(cached.value.hostTimezone);
+    renderSlots();
+    expireAvailability(key, cached, requestId);
+    if (cached.expiresAt > startedAt) return;
+  } else {
+    $('slots').innerHTML = '<div class="loading-times"><i></i><i></i><i></i></div>';
+  }
   try {
-    const availability = preparedAvailability || await request('/api/availability', {
+    const availability = await request('/api/availability', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ date, durationMinutes: state.durationMinutes, viewerTimeZone: state.viewerTimeZone }),
     });
     if (requestId !== state.availabilityRequest) return;
-    if (!preparedAvailability) state.availabilityCache.set(key, {value: availability, expiresAt: startedAt + AVAILABILITY_CACHE_MS});
+    const entry = cacheAvailability(key, availability, startedAt);
+    if (entry.validUntil <= performance.now()) throw new Error('Calendar is refreshing. Please check again shortly.');
+    const choice = state.choice;
+    if (choice && !availability.candidates.some(slot => slot.start === choice.start && slot.end === choice.end)) {
+      state.choice = null;
+      showCalendar();
+      setStatus($('availability-status'), 'That time just became unavailable. Choose another time.');
+    }
+    const candidatesChanged = JSON.stringify(state.availability?.candidates) !== JSON.stringify(availability.candidates);
     state.availability = availability;
-    state.viewerTimeZone = state.availability.viewerTimeZone;
+    state.viewerTimeZone = availability.viewerTimeZone;
     $('viewer-timezone').value = state.viewerTimeZone;
-    $('host-timezone').textContent = zoneLabel(state.availability.hostTimezone);
+    $('host-timezone').textContent = zoneLabel(availability.hostTimezone);
     if (!availability.candidates.length) {
       state.availableDates.delete(date);
       if (state.recommendedDate === date) state.recommendedDate = null;
@@ -173,11 +212,26 @@ async function selectDate(date) {
       setStatus($('availability-status'), 'That date just became unavailable. Choose another date.');
       if (!state.availableDates.size) $('retry-dates').classList.remove('hidden');
     }
-    renderSlots();
+    // Preserve selections and keyboard focus when the background result is unchanged.
+    if (candidatesChanged) renderSlots();
+    expireAvailability(key, entry, requestId);
   } catch (error) {
     if (requestId !== state.availabilityRequest) return;
+    if (error.invalidatePreview) {
+      clearTimeout(state.availabilityExpiry);
+      state.availabilityCache.clear();
+      state.choice = null;
+      showCalendar();
+    }
+    if (!error.invalidatePreview && recent && cached.validUntil > performance.now()) {
+      setStatus($('availability-status'), 'Could not refresh times yet. Booking will recheck your selection.');
+      return;
+    }
+    state.availabilityCache.delete(key);
+    state.availability = null; state.choice = null;
     $('slots').replaceChildren();
-    const empty = document.createElement('p'); empty.className = 'times-empty'; empty.textContent = error.message; $('slots').append(empty);
+    setStatus($('availability-status'), error.message, true);
+    $('retry-dates').classList.remove('hidden');
   }
 }
 
@@ -193,6 +247,9 @@ function renderSlots() {
     const next = document.createElement('button'); next.type = 'button'; next.className = 'next-button'; next.textContent = 'Next'; next.setAttribute('aria-label', `Continue with ${time(slot.start)}`); next.setAttribute('aria-hidden', 'true'); next.tabIndex = -1; next.disabled = true;
     select.addEventListener('click', () => activateTime(row, slot));
     next.addEventListener('click', () => showDetails(slot));
+    if (state.choice?.start === slot.start && state.choice?.end === slot.end) {
+      row.classList.add('selected'); next.disabled = false; next.tabIndex = 0; next.setAttribute('aria-hidden', 'false');
+    }
     row.append(select, next); list.append(row);
   }
   $('demo-note').textContent = state.availability.demo ? 'Demo availability' : '';
@@ -263,6 +320,7 @@ $('booking-form').addEventListener('submit', async (event) => {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ ...bookingInput, idempotencyKey: state.bookingAttempt.key }),
     });
+    clearTimeout(state.availabilityExpiry);
     $('details-step').classList.add('hidden'); $('success-step').classList.remove('hidden');
     $('confirmed-title').textContent = result.booking.meetingTitle || '';
     $('success-summary').innerHTML = `<strong>${fullDateTime(state.choice.start)}</strong><span>${state.durationMinutes} min · Google Meet · ${zoneLabel(state.viewerTimeZone)}</span>`;
