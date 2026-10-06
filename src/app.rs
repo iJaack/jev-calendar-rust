@@ -403,6 +403,7 @@ impl App {
         let mut dates = vec![];
         let mut preferences = vec![];
         let mut first_availability = Value::Null;
+        let mut availability_by_date = serde_json::Map::new();
         for day in days {
             let avail = self
                 .availability(
@@ -424,6 +425,7 @@ impl App {
                 if first_availability.is_null() {
                     first_availability = avail.clone();
                 }
+                availability_by_date.insert(day.clone(), avail);
                 dates.push(day.clone());
                 preferences.push((day, score))
             }
@@ -434,6 +436,7 @@ impl App {
         result["recommendedDate"] = json!(preferences.first().map(|p| &p.0));
         result["partial"] = json!(false);
         result["firstDateAvailability"] = first_availability;
+        result["availabilityByDate"] = Value::Object(availability_by_date);
         Ok(result)
     }
     async fn refresh_workload(&self) -> Result<Value> {

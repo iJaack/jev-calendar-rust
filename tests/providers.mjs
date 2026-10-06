@@ -93,7 +93,7 @@ test('background Jev refresh is due at six hours, stays private and survives a r
   assert.equal(f.state.calls.filter(call=>call.path==='/jev').length, before);
 });
 
-test('month results include the first day and booking still rejects a newly occupied slot', async t => {
+test('month results include every eligible day and booking still rejects newly occupied slots', async t => {
   const f = await fixture(t);
   const month = new Date().toISOString().slice(0,7);
   const response = await f.api('/api/available-dates', {month, durationMinutes:30,viewerTimeZone:'Europe/Rome'});
@@ -102,10 +102,22 @@ test('month results include the first day and booking still rejects a newly occu
   assert.equal(value.partial,false);
   assert.ok(value.dates.length);
   assert.equal(value.firstDateAvailability.date,value.dates[0]);
-  const slot = value.firstDateAvailability.candidates[0];
-  f.state.extraBusy = slot;
-  const booking = await f.api('/api/book', {...slot,date:value.dates[0],durationMinutes:30,viewerTimeZone:'Europe/Rome',guestName:'Synthetic Guest',guestEmail:'guest@example.test',idempotencyKey:'new-conflict-after-preview'});
-  assert.ok([400,409].includes(booking.status), await booking.clone().text());
-  assert.equal(f.state.creationCount,0);
+  assert.deepEqual(Object.keys(value.availabilityByDate).sort(), [...value.dates].sort());
+  assert.deepEqual(value.availabilityByDate[value.dates[0]], value.firstDateAvailability);
+  for (const date of value.dates) {
+    assert.equal(value.availabilityByDate[date].date, date);
+    assert.equal(value.availabilityByDate[date].viewerTimeZone, 'Europe/Rome');
+    assert.equal(value.availabilityByDate[date].durationMinutes, 30);
+    assert.ok(value.availabilityByDate[date].candidates.length);
+  }
+  assert.equal(f.state.calls.filter(call=>call.path==='/calendar/v3/freeBusy').length, 2, 'One month snapshot covers every prepared day');
+  assert.ok(!JSON.stringify(value.availabilityByDate).includes('Synthetic'), 'Only public slot data is exposed');
+  for (const date of value.dates.slice(0,2)) {
+    const slot = value.availabilityByDate[date].candidates[0];
+    f.state.extraBusy = slot;
+    const booking = await f.api('/api/book', {...slot,date,durationMinutes:30,viewerTimeZone:'Europe/Rome',guestName:'Synthetic Guest',guestEmail:'guest@example.test',idempotencyKey:'new-conflict-after-preview-'+date});
+    assert.ok([400,409].includes(booking.status), await booking.clone().text());
+    assert.equal(f.state.creationCount,0);
+  }
   assert.ok(f.state.calls.every(call=>call.path!=='/routes'&&call.path!=='/jev'));
 });

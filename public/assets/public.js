@@ -43,6 +43,7 @@ const state = {
   recommendedDate: null,
   monthRequest: 0,
   bookingAttempt: null,
+  availabilityCache: new Map(),
 };
 
 function dayLabel(value) { return new Intl.DateTimeFormat('en-US', { weekday: 'long', month: 'long', day: 'numeric', timeZone: 'UTC' }).format(new Date(`${value}T12:00:00Z`)); }
@@ -92,8 +93,15 @@ function renderCalendar() {
   $('next-month').disabled = new Date(month.getFullYear(), month.getMonth() + 1, 1, 12) > maxDate;
 }
 
+const AVAILABILITY_CACHE_MS = 60_000;
+function availabilityKey(date) {
+  return JSON.stringify([date, state.durationMinutes, state.viewerTimeZone]);
+}
+
 async function loadMonth(preferredDate = null) {
   const requestId = ++state.monthRequest;
+  const startedAt = performance.now();
+  state.availabilityCache.clear();
   ++state.availabilityRequest;
   state.availableDates = null; state.recommendedDate = null; state.selectedDate = null; state.choice = null; state.availability = null;
   renderCalendar();
@@ -109,6 +117,10 @@ async function loadMonth(preferredDate = null) {
     });
     if (requestId !== state.monthRequest) return;
     state.availableDates = new Set(result.dates);
+    for (const date of result.dates) {
+      const availability = result.availabilityByDate?.[date] || (result.firstDateAvailability?.date === date ? result.firstDateAvailability : null);
+      if (availability) state.availabilityCache.set(availabilityKey(date), {value: availability, expiresAt: startedAt + AVAILABILITY_CACHE_MS});
+    }
     state.recommendedDate = result.recommendedDate && state.availableDates.has(result.recommendedDate) ? result.recommendedDate : null;
     renderCalendar();
     if (!result.dates.length) {
@@ -120,7 +132,7 @@ async function loadMonth(preferredDate = null) {
     }
     setStatus($('availability-status'));
     const firstDate = preferredDate && state.availableDates.has(preferredDate) ? preferredDate : result.dates[0];
-    await selectDate(firstDate, result.firstDateAvailability?.date === firstDate ? result.firstDateAvailability : null);
+    await selectDate(firstDate);
     if (result.partial && requestId === state.monthRequest) setStatus($('availability-status'), 'Some dates could not be checked. Try again later.');
   } catch (error) {
     if (requestId !== state.monthRequest) return;
@@ -131,9 +143,13 @@ async function loadMonth(preferredDate = null) {
   }
 }
 
-async function selectDate(date, preparedAvailability = null) {
+async function selectDate(date) {
   if (!state.availableDates?.has(date)) return;
   const requestId = ++state.availabilityRequest;
+  const startedAt = performance.now();
+  const key = availabilityKey(date);
+  const cached = state.availabilityCache.get(key);
+  const preparedAvailability = cached?.expiresAt > startedAt ? cached.value : null;
   setStatus($('availability-status'));
   state.selectedDate = date; state.choice = null; state.availability = null; renderCalendar();
   $('times-date').textContent = dayLabel(date);
@@ -144,6 +160,7 @@ async function selectDate(date, preparedAvailability = null) {
       body: JSON.stringify({ date, durationMinutes: state.durationMinutes, viewerTimeZone: state.viewerTimeZone }),
     });
     if (requestId !== state.availabilityRequest) return;
+    if (!preparedAvailability) state.availabilityCache.set(key, {value: availability, expiresAt: startedAt + AVAILABILITY_CACHE_MS});
     state.availability = availability;
     state.viewerTimeZone = state.availability.viewerTimeZone;
     $('viewer-timezone').value = state.viewerTimeZone;
@@ -168,7 +185,7 @@ function renderSlots() {
   const { candidates } = state.availability;
   const list = $('slots'); list.replaceChildren();
   if (!candidates.length) {
-    const empty = document.createElement('p'); empty.className = 'times-empty'; empty.textContent = 'No times fit Jaack’s calendar and travel buffer on this date. Try another date.'; list.append(empty); return;
+    const empty = document.createElement('p'); empty.className = 'times-empty'; empty.textContent = 'No times fit Jaack’s calendar and meeting spacing on this date. Try another date.'; list.append(empty); return;
   }
   for (const slot of candidates) {
     const row = document.createElement('div'); row.className = 'time-choice';
