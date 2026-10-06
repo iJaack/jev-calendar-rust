@@ -1,7 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {readFileSync} from 'node:fs';
+import {existsSync,readFileSync} from 'node:fs';
 import vm from 'node:vm';
+import {createHash} from 'node:crypto';
 
 const source = readFileSync(new URL('../public/assets/public.js', import.meta.url), 'utf8');
 const functions = source.slice(source.indexOf('const AVAILABILITY_CACHE_MS'), source.indexOf('function renderSlots()'));
@@ -131,4 +132,17 @@ test('opening booking details stops preview timers and ignores an in-flight rech
   f.context.showDetails(choice);f.advance(120_000);
   assert.equal(f.context.state.choice.start,choice.start,'Entering details preserves the proposed booking time');
   assert.ok(f.context.state.availabilityRequest>requestId,'Earlier preview responses cannot interrupt details');
+});
+
+test('booking and privacy asset versions identify the exact shipped contents',()=>{
+ for(const page of ['index.html','privacy.html']) {
+  const html=readFileSync(new URL('../public/'+page,import.meta.url),'utf8');
+  const references=[...html.matchAll(/\/assets\/(public\.js|app\.css)\?v=([^"']+)/g)];
+  assert.equal(references.length,page==='index.html'?2:1);
+  for(const [,asset,version] of references) {
+   const override=new URL('../public/assets/'+asset,import.meta.url);
+   const path=existsSync(override)?override:new URL('../reference/public/assets/'+asset,import.meta.url);
+   assert.equal(version,createHash('sha256').update(readFileSync(path)).digest('hex').slice(0,16));
+  }
+ }
 });

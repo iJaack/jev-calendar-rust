@@ -696,6 +696,8 @@ impl App {
         let clean = tokio::fs::canonicalize(candidate).await?;
         ensure!(clean.starts_with(&root) && clean.is_file(), "Forbidden");
         let body = tokio::fs::read(&clean).await?;
+        use sha2::Digest;
+        let etag = format!("\"{:x}\"", sha2::Sha256::digest(&body));
         let mime = match clean.extension().and_then(|x| x.to_str()).unwrap_or("") {
             "html" => "text/html; charset=utf-8",
             "js" => "text/javascript; charset=utf-8",
@@ -708,6 +710,7 @@ impl App {
         Ok(Response::builder()
             .status(200)
             .header("Content-Type", mime)
+            .header("ETag", etag)
             .header("Cache-Control", "no-store")
             .header("X-Content-Type-Options", "nosniff")
             .body(Body::from(body))?)
@@ -1378,6 +1381,18 @@ async fn public_handler(State(app): State<Arc<App>>, request: Request<Body>) -> 
         let upstream = req.send().await?;
         let code = upstream.status().as_u16();
         let content = upstream.headers().get("Content-Type").cloned();
+        let etag = upstream.headers().get("ETag").cloned();
+        let immutable = query.get("v").is_some_and(|version| {
+            version.len() == 16
+                && etag
+                    .as_ref()
+                    .and_then(|tag| tag.to_str().ok())
+                    .is_some_and(|tag| {
+                        tag.strip_prefix('"')
+                            .and_then(|tag| tag.strip_suffix('"'))
+                            .is_some_and(|digest| digest.len() == 64 && digest.starts_with(version))
+                    })
+        });
         let bytes = if method == Method::HEAD {
             axum::body::Bytes::new()
         } else {
@@ -1387,8 +1402,12 @@ async fn public_handler(State(app): State<Arc<App>>, request: Request<Body>) -> 
             .status(code)
             .header(
                 "Cache-Control",
-                if path.starts_with("/assets/") {
-                    "public, max-age=300"
+                if code == 200 && path.starts_with("/assets/") {
+                    if immutable {
+                        "public, max-age=31536000, immutable"
+                    } else {
+                        "public, max-age=300"
+                    }
                 } else {
                     "no-store"
                 },
@@ -1396,6 +1415,9 @@ async fn public_handler(State(app): State<Arc<App>>, request: Request<Body>) -> 
             .body(Body::from(bytes))?;
         if let Some(v) = content {
             r.headers_mut().insert("Content-Type", v);
+        }
+        if let Some(v) = etag {
+            r.headers_mut().insert("ETag", v);
         }
         Ok::<_, anyhow::Error>(r)
     }
