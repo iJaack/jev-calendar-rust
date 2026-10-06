@@ -304,24 +304,35 @@ impl Providers {
         end: &str,
     ) -> Result<Vec<Value>> {
         let mut result = vec![];
-        for account in &calendar.accounts {
-            let calendars = self.calendars(calendar, account).await?;
-            for batch in calendars.chunks(50) {
-                let items: Vec<_> = batch.iter().map(|v| json!({"id":v["id"]})).collect();
-                let v=self.request(account,reqwest::Method::POST,"/freeBusy",Some(&json!({"timeMin":start,"timeMax":end,"calendarExpansionMax":50,"items":items})),None).await?;
-                for c in batch {
-                    let entry = &v["calendars"][text(c, "id")];
-                    ensure!(
-                        entry.is_object()
-                            && array(&entry["errors"]).is_empty()
-                            && entry["busy"].is_array(),
-                        "Unable to check every Google calendar. Please try again later."
-                    );
-                    for busy in array(&entry["busy"]) {
-                        result.push(json!({"start":busy["start"],"end":busy["end"]}))
+        let end_epoch = crate::epoch(end).ok_or_else(|| anyhow!("Invalid calendar range"))?;
+        let mut window_start =
+            crate::epoch(start).ok_or_else(|| anyhow!("Invalid calendar range"))?;
+        ensure!(window_start < end_epoch, "Invalid calendar range");
+        // Google rejects long free/busy ranges. Reuse the discovered calendars across bounded windows.
+        while window_start < end_epoch {
+            let window_end = (window_start + 30 * 86_400_000).min(end_epoch);
+            let start = crate::iso(window_start);
+            let end = crate::iso(window_end);
+            for account in &calendar.accounts {
+                let calendars = self.calendars(calendar, account).await?;
+                for batch in calendars.chunks(50) {
+                    let items: Vec<_> = batch.iter().map(|v| json!({"id":v["id"]})).collect();
+                    let v=self.request(account,reqwest::Method::POST,"/freeBusy",Some(&json!({"timeMin":start,"timeMax":end,"calendarExpansionMax":50,"items":items})),None).await?;
+                    for c in batch {
+                        let entry = &v["calendars"][text(c, "id")];
+                        ensure!(
+                            entry.is_object()
+                                && array(&entry["errors"]).is_empty()
+                                && entry["busy"].is_array(),
+                            "Unable to check every Google calendar. Please try again later."
+                        );
+                        for busy in array(&entry["busy"]) {
+                            result.push(json!({"start":busy["start"],"end":busy["end"]}))
+                        }
                     }
                 }
             }
+            window_start = window_end;
         }
         Ok(result)
     }

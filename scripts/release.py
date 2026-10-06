@@ -112,8 +112,10 @@ def readback(rust):
                 with urllib.request.urlopen(req, timeout=2) as r:
                     if (r.headers.get('X-Jev-Backend') == 'rust') != rust:
                         raise RuntimeError('Unexpected backend')
-                    if json.load(r).get('ok'):
+                    health = json.load(r)
+                    if health.get('ok') and health.get('previewReady', True):
                         break
+                    time.sleep(0.1)
             except (OSError, ValueError):
                 time.sleep(0.1)
         else:

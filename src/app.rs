@@ -484,7 +484,7 @@ impl App {
                 .is_match(&month),
             "Invalid month"
         );
-        let snapshot = if self.demo {
+        let mut snapshot = if self.demo {
             None
         } else {
             Some(self.preview_snapshot()?)
@@ -519,6 +519,23 @@ impl App {
         if days.is_empty() {
             return Ok(result);
         }
+        if let Some(snapshot) = snapshot.as_mut() {
+            let first = s::date(s::zoned(&days[0], 0.0, &viewer)?, &zone)?;
+            let last = s::date(
+                s::zoned(days.last().expect("nonempty"), 24.0, &viewer)? - 1,
+                &zone,
+            )?;
+            let start = iso(s::zoned(&s::monday(&first)?, 0.0, &zone)?);
+            let end = iso(s::zoned(&s::shift(&s::monday(&last)?, 12)?, 0.0, &zone)?);
+            for field in ["busy", "events"] {
+                snapshot[field] = json!(
+                    array(&snapshot[field])
+                        .into_iter()
+                        .filter(|v| s::overlaps(&start, &end, v))
+                        .collect::<Vec<_>>()
+                );
+            }
+        }
         let rules = self.rules()?;
         let mut dates = vec![];
         let mut preferences = vec![];
@@ -538,23 +555,25 @@ impl App {
                 avail["previewMaxAgeMs"] = snapshot["previewMaxAgeMs"].clone();
             }
             if !array(&avail["candidates"]).is_empty() {
-                let date = s::date(
-                    epoch(&text(&avail["candidates"][0], "start"))
-                        .ok_or_else(|| anyhow!("Invalid candidate"))?,
-                    &zone,
-                )?;
-                let score = w::preference(
-                    &json!({"day":date,"zone":zone,"hours":settings["hours"],"busy":snapshot.as_ref().map(|s|s["busy"].clone()).unwrap_or(json!([])),"events":snapshot.as_ref().map(|s|s["events"].clone()).unwrap_or(json!([])),"rules":rules}),
-                )?;
+                // Recommendation uses only the first seven eligible dates.
+                if preferences.len() < 7 {
+                    let date = s::date(
+                        epoch(&text(&avail["candidates"][0], "start"))
+                            .ok_or_else(|| anyhow!("Invalid candidate"))?,
+                        &zone,
+                    )?;
+                    let score = w::preference(
+                        &json!({"day":date,"zone":zone,"hours":settings["hours"],"busy":snapshot.as_ref().map(|s|s["busy"].clone()).unwrap_or(json!([])),"events":snapshot.as_ref().map(|s|s["events"].clone()).unwrap_or(json!([])),"rules":rules}),
+                    )?;
+                    preferences.push((day.clone(), score));
+                }
                 if first_availability.is_null() {
                     first_availability = avail.clone();
                 }
                 availability_by_date.insert(day.clone(), avail);
                 dates.push(day.clone());
-                preferences.push((day, score))
             }
         }
-        preferences.truncate(7);
         preferences.sort_by(|a, b| b.1.total_cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
         result["dates"] = json!(dates);
         result["recommendedDate"] = json!(preferences.first().map(|p| &p.0));
@@ -746,7 +765,7 @@ impl App {
         if method == Method::GET && path == "/health" {
             return Ok(response(
                 200,
-                json!({"ok":true,"demo":self.demo,"calendar":if self.demo{"demo"}else{"google"}}),
+                json!({"ok":true,"demo":self.demo,"calendar":if self.demo{"demo"}else{"google"},"previewReady":self.demo || self.preview_snapshot().is_ok()}),
             ));
         }
         if method == Method::GET && path == "/api/config" {
@@ -1497,8 +1516,8 @@ pub async fn run() -> Result<()> {
     if !public && !demo {
         app.providers.migrate().await?;
         let started = Instant::now();
-        if app.refresh_preview().await.is_err() {
-            eprintln!("Initial calendar snapshot unavailable; background refresh will retry");
+        if let Err(error) = app.refresh_preview().await {
+            eprintln!("Initial calendar snapshot unavailable: {error}");
         } else {
             eprintln!(
                 "Initial calendar snapshot ready in {} ms",
@@ -1555,8 +1574,8 @@ pub async fn run() -> Result<()> {
                     _ = timer.tick() => {},
                     _ = app.preview_changed.notified() => {},
                 }
-                if app.refresh_preview().await.is_err() {
-                    eprintln!("Background calendar snapshot refresh failed");
+                if let Err(error) = app.refresh_preview().await {
+                    eprintln!("Background calendar snapshot refresh failed: {error}");
                 }
             }
         }))

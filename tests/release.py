@@ -60,6 +60,15 @@ class Recovery(unittest.TestCase):
         with patch.object(release.urllib.request, 'urlopen', side_effect=replies), patch.object(release.time, 'sleep'):
             release.readback(True)
 
+    def test_readback_waits_until_calendar_previews_are_ready(self):
+        def health(ready):
+            value = BytesIO(json.dumps({'ok': True, 'previewReady': ready}).encode())
+            value.headers = {'X-Jev-Backend': 'rust'}
+            return value
+        with patch.object(release.urllib.request, 'urlopen', side_effect=[health(False), health(True), health(True)]) as request, patch.object(release.time, 'sleep'):
+            release.readback(True)
+            self.assertEqual(request.call_count, 3)
+
     def test_current_backend_checks_both_services_and_health(self):
         def response(rust, ok=True):
             value = BytesIO(json.dumps({'ok': ok}).encode())
