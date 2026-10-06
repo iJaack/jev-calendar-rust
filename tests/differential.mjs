@@ -35,6 +35,11 @@ for(let pattern=0;pattern<32;pattern++){
  const learning={...input,startDay:day,days:28};const learned=workload.learnWorkload(learning);delete learned.updatedAt;add('learnWorkload',learning,learned);
  const alert={...input,days:Array.from({length:5},(_,n)=>scheduling.shiftDay(day,n))};add('weeklyWorkloadAlert',alert,workload.weeklyWorkloadAlert(alert));
 }
+// Reusing compiled workload matchers must preserve keyword boundaries and priority.
+for (const summary of ['Project CALL','Project call-back','Project callback','Project calligraphy','Project sync','Project async','Project 1:1','Project meeting','Project meetings','Project [focus] call','Project [deadline] meeting','Project focus block']) {
+ const input={day:'2030-10-07',zone:'Europe/Rome',hours:{start:9,end:18},busy:[],events:[{summary,start:'2030-10-07T08:00:00Z',end:'2030-10-07T09:00:00Z'}],rules:[{name:'Project',type:'focus',keywords:['Project'],calendarIds:[]}]};
+ add('dayWorkload',input,workload.dayWorkload(input));
+}
 const secret='synthetic-cross-language-secret',plaintext=JSON.stringify({refresh_token:'synthetic-token',scope:'synthetic'}),ciphertext=new SecretBox(secret).encrypt(plaintext);
 add('decrypt',{secret,ciphertext},plaintext);
 const links=new BookingLinks({secret,publicOrigin:'https://example.test'});add('managementToken',{secret,key:'synthetic-booking-key'},links.token('synthetic-booking-key'));add('managementKey',{secret,token:links.token('synthetic-booking-key')},'synthetic-booking-key');

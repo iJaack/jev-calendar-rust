@@ -1,6 +1,6 @@
 {
-  "cases": 5920,
-  "pass": 5920,
+  "cases": 5932,
+  "pass": 5932,
   "crypto": "bidirectional",
   "zones": [
     "Europe/Rome",

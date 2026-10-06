@@ -4,7 +4,7 @@ use futures_util::{StreamExt, TryStreamExt};
 use serde_json::{Value, json};
 use std::{
     collections::{HashMap, HashSet},
-    sync::{Arc, Mutex},
+    sync::{Arc, LazyLock, Mutex},
     time::Duration,
 };
 pub const MODEL: &str = "jev-1.13.0";
@@ -803,7 +803,10 @@ pub fn encode(s: &str) -> String {
     url::form_urlencoded::byte_serialize(s.as_bytes()).collect()
 }
 pub fn physical(s: &str) -> bool {
-    !s.trim().is_empty()&&!regex::Regex::new(r"(?i)^(?:https?://|tel:)|\b(?:google\s*meet|zoom|microsoft\s*teams|teams\s*meeting|webex|online|virtual)\b").expect("static regex").is_match(s.trim())
+    static VIRTUAL: LazyLock<regex::Regex> = LazyLock::new(|| {
+        regex::Regex::new(r"(?i)^(?:https?://|tel:)|\b(?:google\s*meet|zoom|microsoft\s*teams|teams\s*meeting|webex|online|virtual)\b").expect("static regex")
+    });
+    !s.trim().is_empty() && !VIRTUAL.is_match(s.trim())
 }
 fn photon(v: &Value) -> Option<Value> {
     let p = &v["properties"];

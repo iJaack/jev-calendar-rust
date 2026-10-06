@@ -1,7 +1,10 @@
 use crate::{array, epoch, iso, now, number, scheduling as s, text};
 use anyhow::{Result, ensure};
 use serde_json::{Value, json};
-use std::collections::{HashMap, HashSet};
+use std::{
+    collections::{HashMap, HashSet},
+    sync::LazyLock,
+};
 type Intervals = Vec<(i64, i64)>;
 type ProjectIntervals = (Intervals, HashMap<String, Intervals>);
 pub fn defaults() -> Vec<Value> {
@@ -40,6 +43,8 @@ fn project<'a>(event: &Value, rules: &'a [Value]) -> Option<&'a Value> {
     })
 }
 fn kind(event: &Value, fallback: &str) -> String {
+    static MEETING: LazyLock<regex::Regex> =
+        LazyLock::new(|| regex::Regex::new(r"\b(meeting|call|sync|1:1)\b").expect("static regex"));
     let t = text(event, "summary").to_lowercase();
     if t.contains("[deadline]")
         || t.starts_with("deadline:")
@@ -51,11 +56,7 @@ fn kind(event: &Value, fallback: &str) -> String {
     if t.contains("[focus]") || t.contains("deep work") || t.contains("focus block") {
         return "focus".into();
     }
-    if t.contains("[meeting]")
-        || regex::Regex::new(r"\b(meeting|call|sync|1:1)\b")
-            .expect("static regex")
-            .is_match(&t)
-    {
+    if t.contains("[meeting]") || MEETING.is_match(&t) {
         return "meetings".into();
     }
     fallback.into()
@@ -95,17 +96,18 @@ pub fn day(v: &Value) -> Result<Value> {
     let rules = array(&v["rules"]);
     let mut projects: HashMap<String, ProjectIntervals> = HashMap::new();
     for event in array(&v["events"]) {
+        let intervals = clip(std::slice::from_ref(&event), bounds);
+        if intervals.is_empty() {
+            continue;
+        }
         if let Some(r) = project(&event, &rules) {
-            let intervals = clip(std::slice::from_ref(&event), bounds);
-            if !intervals.is_empty() {
-                let entry = projects.entry(text(r, "name")).or_default();
-                entry.0.extend(&intervals);
-                entry
-                    .1
-                    .entry(kind(&event, &text(r, "type")))
-                    .or_default()
-                    .extend(intervals);
-            }
+            let entry = projects.entry(text(r, "name")).or_default();
+            entry.0.extend(&intervals);
+            entry
+                .1
+                .entry(kind(&event, &text(r, "type")))
+                .or_default()
+                .extend(intervals);
         }
     }
     let mut result = json!({});

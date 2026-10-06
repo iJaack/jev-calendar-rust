@@ -16,7 +16,7 @@ use axum::{
 use serde_json::{Value, json};
 use std::{
     collections::HashMap,
-    sync::{Arc, Mutex},
+    sync::{Arc, LazyLock, Mutex},
     time::{Duration, Instant},
 };
 use subtle::ConstantTimeEq;
@@ -367,10 +367,9 @@ impl App {
         } else {
             zone.clone()
         };
-        let date = if regex::Regex::new(r"^\d{4}-\d{2}-\d{2}$")
-            .expect("static regex")
-            .is_match(&text(input, "date"))
-        {
+        static DATE: LazyLock<regex::Regex> =
+            LazyLock::new(|| regex::Regex::new(r"^\d{4}-\d{2}-\d{2}$").expect("static regex"));
+        let date = if DATE.is_match(&text(input, "date")) {
             text(input, "date")
         } else {
             s::date(now() + 86_400_000, &viewer)?
@@ -478,12 +477,9 @@ impl App {
     }
     async fn dates(&self, input: &Value) -> Result<Value> {
         let month = text(input, "month");
-        ensure!(
-            regex::Regex::new(r"^\d{4}-(0[1-9]|1[0-2])$")
-                .expect("static regex")
-                .is_match(&month),
-            "Invalid month"
-        );
+        static MONTH: LazyLock<regex::Regex> =
+            LazyLock::new(|| regex::Regex::new(r"^\d{4}-(0[1-9]|1[0-2])$").expect("static regex"));
+        ensure!(MONTH.is_match(&month), "Invalid month");
         let mut snapshot = if self.demo {
             None
         } else {
