@@ -736,54 +736,6 @@ impl Providers {
             .remove(&id);
         Ok(flow["intent"] == "login")
     }
-    pub async fn route(
-        &self,
-        origin: &str,
-        destination: &str,
-        mode: &str,
-        departure: &str,
-    ) -> Result<Value> {
-        ensure!(
-            !self.env("GOOGLE_ROUTES_API_KEY").is_empty(),
-            "Google Routes API key is not configured"
-        );
-        let mut body = json!({"origin":{"address":origin},"destination":{"address":destination},"travelMode":mode});
-        if mode == "DRIVE" {
-            body["routingPreference"] = json!("TRAFFIC_AWARE")
-        }
-        if epoch(departure).is_some_and(|t| t > now() + 60_000) {
-            body["departureTime"] = json!(departure)
-        }
-        let r = self
-            .client
-            .post(self.endpoint(
-                "https://routes.googleapis.com/directions/v2:computeRoutes",
-                "/routes",
-            ))
-            .header("X-Goog-Api-Key", self.env("GOOGLE_ROUTES_API_KEY"))
-            .header("X-Goog-FieldMask", "routes.duration,routes.distanceMeters")
-            .json(&body)
-            .send()
-            .await?;
-        ensure!(
-            r.status().is_success(),
-            "Google Routes failed ({})",
-            r.status().as_u16()
-        );
-        let v: Value = r.json().await?;
-        let route = &v["routes"][0];
-        let seconds = text(route, "duration")
-            .strip_suffix('s')
-            .and_then(|duration| duration.parse::<f64>().ok())
-            .ok_or_else(|| anyhow!("Google Routes returned no duration"))?;
-        ensure!(
-            seconds.is_finite() && seconds >= 0.0,
-            "Google Routes returned no duration"
-        );
-        Ok(
-            json!({"seconds":seconds,"distanceMeters":route["distanceMeters"],"provider":"google-routes","mode":mode}),
-        )
-    }
     pub async fn jev(&self, state: &Value, questions: &Value) -> Result<Value> {
         ensure!(!self.env("TYPESAFE_API_KEY").is_empty(), "unconfigured");
         let r = self

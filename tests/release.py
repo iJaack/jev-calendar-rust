@@ -26,6 +26,31 @@ class Recovery(unittest.TestCase):
                 with self.assertRaisesRegex(RuntimeError, 'Existing reference differs'):
                     restore_reference.restore()
 
+    def test_package_overlays_current_frontend_and_checksums_assets(self):
+        with tempfile.TemporaryDirectory(prefix='jev-package-test-') as directory:
+            root = pathlib.Path(directory)
+            for name, content in {
+                'reference/public/assets/public.js': 'captured frontend',
+                'reference/public/assets/favicon.png': 'captured image',
+                'public/assets/public.js': 'current earliest-date frontend',
+                'public/privacy.html': 'current privacy text',
+                'target/release/jev-calendar': 'synthetic binary',
+                'Cargo.lock': 'synthetic lockfile',
+                'rust-toolchain.toml': 'synthetic toolchain',
+            }.items():
+                target = root / name
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_text(content)
+            with patch.object(release, 'ROOT', root), patch.object(release, 'baseline', lambda: None):
+                package = release.package()
+                self.assertEqual((package / 'public/assets/public.js').read_text(), 'current earliest-date frontend')
+                self.assertEqual((package / 'public/assets/favicon.png').read_text(), 'captured image')
+                self.assertEqual((package / 'public/privacy.html').read_text(), 'current privacy text')
+                release.verify(package)
+                (package / 'public/assets/public.js').write_text('tampered release asset')
+                with self.assertRaisesRegex(RuntimeError, 'Release checksum failed'):
+                    release.verify(package)
+
     def test_current_backend_checks_both_services_and_health(self):
         def response(rust, ok=True):
             value = BytesIO(json.dumps({'ok': ok}).encode())

@@ -12,16 +12,18 @@ import { GOOGLE_SCOPES } from '../reference/lib/google-accounts.js';
 const root=new URL('..',import.meta.url).pathname;
 const binary=new URL('../target/debug/jev-calendar',import.meta.url).pathname;
 async function port(){const s=createServer().listen(0,'127.0.0.1');await once(s,'listening');const p=s.address().port;await new Promise(r=>s.close(r));return p;}
-async function fixture(t,{travel=false,travelDates=['2030-10-07']}={}){
+async function fixture(t,{travel=false,travelDates=['2030-10-07'],learningAgeMs=0,jevLow=false}={}){
  const dir=mkdtempSync(join(tmpdir(),'jev-rust-provider-')),path=join(dir,'fixture.sqlite'),store=new SqliteStore({path,encryptionSecret:'synthetic-key'});
  const token={access_token:'owner-token',refresh_token:'synthetic-refresh',scope:GOOGLE_SCOPES,expires_at:Date.now()+3600_000};store.connectGoogle('owner@example.test',token);const session=store.newSession();
  store.putSetting('settings',{timezone:'Europe/Rome',hours:{start:9,end:18},baseLocation:travel?'Synthetic Base Street 1':'',minimumBookingNoticeMinutes:0,minimumTravelBufferMinutes:10});
- const state={calls:[],events:new Map(),creationCount:0,updateCount:0,loseCreate:false,loseGet:false,loseCancel:false,missingCalendar:false,newCalendar:false,routeLimit:false,refreshGate:null};
+ store.putSetting('projectRules',[]);
+ store.putSetting('workloadLearning',{signature:JSON.stringify(['week-intelligence-v1',{start:9,end:18},0,[],'Europe/Rome']),updatedAt:new Date(Date.now()-learningAgeMs).toISOString(),bookingNotice:{source:'fallback',minutes:0},baselineBusyMinutes:135,typicalProjectMinutes:{}});
+ const state={jevLow,calls:[],events:new Map(),creationCount:0,updateCount:0,loseCreate:false,loseGet:false,loseCancel:false,missingCalendar:false,newCalendar:false,routeLimit:false,refreshGate:null};
  const provider=createServer(async(req,res)=>{const url=new URL(req.url,'http://fixture.test');let raw='';for await(const chunk of req)raw+=chunk;const body=raw&&req.headers['content-type']?.includes('json')?JSON.parse(raw):{};const bearer=req.headers.authorization||'';state.calls.push({path:url.pathname,query:url.search,method:req.method,body,bearer,etag:req.headers['if-match']});const send=(code,value)=>{res.writeHead(code,{'Content-Type':'application/json'});res.end(JSON.stringify(value));};
   if(url.pathname==='/oauth/token'){if(state.refreshGate)await state.refreshGate;const form=new URLSearchParams(raw);const identity=form.get('code')==='wrong-owner'?'other':'owner';return send(200,{access_token:identity+'-token',refresh_token:'synthetic-refresh',scope:GOOGLE_SCOPES,expires_in:3600});}
   if(url.pathname==='/calendar/v3/users/me/settings/timezone')return send(200,{value:'Europe/Rome'});
   if(url.pathname==='/calendar/v3/users/me/calendarList'){const identity=bearer==='Bearer other-token'?'other':'owner';const calendars=[{id:identity+'@example.test',primary:true,accessRole:'owner',summary:'Synthetic primary'},...Array.from({length:52},(_,n)=>({id:'shared-'+n,hidden:n===0,selected:false,accessRole:n===1?'freeBusyReader':'reader',summary:'Synthetic '+n}))];if(state.newCalendar)calendars.push({id:'new-hidden',hidden:true,accessRole:'freeBusyReader'});return send(200,{items:url.searchParams.has('pageToken')?calendars.slice(30):calendars.slice(0,30),...(!url.searchParams.has('pageToken')?{nextPageToken:'page-two'}:{})});}
-  if(url.pathname==='/calendar/v3/freeBusy'){const calendars={};for(const item of body.items){if(state.missingCalendar&&item.id==='shared-0')continue;calendars[item.id]={busy:item.id==='shared-0'?[{start:'2030-10-07T07:00:00.000Z',end:'2030-10-07T08:00:00.000Z'}]:[]};}return send(200,{calendars});}
+  if(url.pathname==='/calendar/v3/freeBusy'){const calendars={};for(const item of body.items){if(state.missingCalendar&&item.id==='shared-0')continue;calendars[item.id]={busy:[...(item.id==='shared-0'?[{start:'2030-10-07T07:00:00.000Z',end:'2030-10-07T08:00:00.000Z'},...(state.extraBusy?[state.extraBusy]:[])]:[]),...(travel&&item.id==='shared-2'?travelDates.map(date=>({start:date+'T10:00:00.000Z',end:date+'T11:00:00.000Z'})):[])]};}return send(200,{calendars});}
   if(url.pathname==='/calendar/v3/calendars/primary/events'&&req.method==='POST'){if(state.createGate)await state.createGate;state.creationCount++;assert.match(body.id,/^[0-9a-v]{5,1024}$/);if(state.events.has(body.id))return send(409,{error:'duplicate'});const event={...body,id:body.id,etag:'revision-0',hangoutLink:'https://meet.google.com/synthetic'};state.events.set(body.id,event);if(state.loseCreate){state.loseCreate=false;state.loseGet=true;req.socket.destroy();return;}return send(200,event);}
   if(url.pathname.startsWith('/calendar/v3/calendars/primary/events/')){const id=decodeURIComponent(url.pathname.split('/').at(-1)),event=state.events.get(id);if(req.method==='GET'){if(state.loseGet){state.loseGet=false;return send(503,{error:'readback unavailable'});}return event?send(200,event):send(404,{});}if(!event)return send(404,{});if(req.headers['if-match']!==event.etag)return send(412,{});state.updateCount++;if(req.method==='DELETE'){state.events.set(id,{id,status:'cancelled'});if(state.loseCancel){state.loseCancel=false;req.socket.destroy();return;}return send(204,null);}const moved={...event,...body,etag:'revision-'+state.updateCount};state.events.set(id,moved);return send(200,moved);}
   if(/\/calendar\/v3\/calendars\/.+\/events$/.test(url.pathname)){const id=decodeURIComponent(url.pathname.split('/').at(-2));return send(200,{items:travel&&id==='shared-2'?travelDates.map(date=>({start:{dateTime:date+'T10:00:00.000Z'},end:{dateTime:date+'T11:00:00.000Z'},location:'Synthetic Event Street 2',summary:'Team1 [meeting]',status:'confirmed'})):[]});}
@@ -39,7 +41,6 @@ async function fixture(t,{travel=false,travelDates=['2030-10-07']}={}){
 test('real adapters paginate every calendar, fail closed and discover new hidden calendars',async t=>{const f=await fixture(t);const input={date:'2030-10-07',viewerTimeZone:'Europe/Rome',durationMinutes:30};let r=await f.api('/api/availability',input);assert.equal(r.status,200,await r.clone().text());let v=await r.json();assert.ok(v.candidates.every(c=>Date.parse(c.start)>=Date.parse('2030-10-07T08:10:00Z')));assert.ok(f.state.calls.some(c=>c.path.endsWith('calendarList')&&c.query.includes('pageToken')));assert.ok(f.state.calls.filter(c=>c.path.endsWith('freeBusy')).every(c=>c.body.items.length<=50));assert.ok(f.state.calls.some(c=>c.path.endsWith('freeBusy')&&c.body.items.some(i=>i.id==='shared-1')));f.state.newCalendar=true;await f.api('/api/availability',input);assert.ok(f.state.calls.some(c=>c.path.endsWith('freeBusy')&&c.body.items.some(i=>i.id==='new-hidden')));f.state.missingCalendar=true;r=await f.api('/api/availability',input);assert.equal(r.status,400);assert.match((await r.json()).error,/every Google calendar/);});
 test('Google creation survives lost response, replays once and preserves event and Meet during changes',async t=>{const f=await fixture(t);const input={date:'2030-10-07',viewerTimeZone:'Europe/Rome',durationMinutes:30};const slots=await(await f.api('/api/availability',input)).json();const body={...input,...slots.candidates[0],idempotencyKey:'lost-creation-synthetic-key',guestName:'Synthetic Guest',guestEmail:'guest@example.test',meetingTitle:'Synthetic test'};f.state.loseCreate=true;let r=await f.api('/api/book',body);assert.equal(r.status,503,await r.clone().text());await f.restart();r=await f.api('/api/book',body);assert.equal(r.status,200,await r.clone().text());const booking=(await r.json()).booking;assert.equal(f.state.creationCount,1);assert.equal(booking.meetLink,'https://meet.google.com/synthetic');r=await f.api('/api/book',body);assert.equal(r.status,200);assert.equal(f.state.creationCount,1);const token=new URLSearchParams(new URL(booking.managementUrl).hash.slice(1)).get('token');const view=await(await f.api('/api/booking/view',{token})).json();const next=await(await f.api('/api/booking/slots',{token,date:'2030-10-08',viewerTimeZone:'Europe/Rome'})).json();r=await f.api('/api/booking/change',{token,action:'reschedule',revision:view.revision,date:'2030-10-08',viewerTimeZone:'Europe/Rome',...next.candidates[0]});assert.equal(r.status,200,await r.clone().text());assert.equal((await r.json()).meetLink,booking.meetLink);assert.equal(f.state.events.get(booking.eventId).hangoutLink,booking.meetLink);assert.ok(f.state.calls.some(c=>c.method==='PATCH'&&c.etag==='revision-0'&&c.query.includes('sendUpdates=all')));f.state.loseCancel=true;r=await f.api('/api/booking/change',{token,action:'cancel',revision:1});assert.equal(r.status,200);assert.equal((await r.json()).status,'cancelled');assert.equal(f.state.creationCount,1);assert.equal(f.store.get(body.idempotencyKey).status,'cancelled');});
 test('OAuth rejects wrong owner and replay; refresh persists compatible credentials',async t=>{const f=await fixture(t);let r=await f.api('/auth/google');assert.equal(r.status,302);const url=new URL(r.headers.get('location')),state=url.searchParams.get('state');assert.ok(url.searchParams.get('scope').includes('calendar.events.freebusy'));r=await fetch(f.origin+'/auth/google/callback?'+new URLSearchParams({state,code:'wrong-owner'}),{headers:{Cookie:`jev_oauth=${state}`},redirect:'manual'});assert.equal(r.status,400);assert.match((await r.json()).error,/original dashboard owner/);r=await f.api('/auth/google');const second=new URL(r.headers.get('location')).searchParams.get('state');const callback='/auth/google/callback?'+new URLSearchParams({state:second,code:'owner'});r=await fetch(f.origin+callback,{headers:{Cookie:`jev_oauth=${second}`},redirect:'manual'});assert.equal(r.status,302);assert.ok(r.headers.get('set-cookie').includes('jev_session='));r=await fetch(f.origin+callback,{headers:{Cookie:`jev_oauth=${second}`},redirect:'manual'});assert.equal(r.status,400);const a=f.store.googleAccount('owner@example.test');f.store.refreshGoogle(a.id,a.version,{...a.token,expires_at:0});r=await f.api('/api/availability',{date:'2030-10-07'});assert.equal(r.status,200);assert.ok(f.store.googleAccount(a.id).token.expires_at>Date.now());assert.ok(f.state.calls.some(c=>c.path==='/oauth/token'));});
-test('travel advice stays bounded and private; route quota failure fails safely',async t=>{const f=await fixture(t,{travel:true});const r=await f.api('/api/availability',{date:'2030-10-07',viewerTimeZone:'Europe/Rome',durationMinutes:30});assert.equal(r.status,200,await r.clone().text());const v=await r.json();assert.equal(v.travel.adviceSource,'jev');assert.equal(v.travel.maximumBufferMinutes,20);assert.ok(f.state.calls.some(c=>c.path==='/routes'&&c.body.travelMode==='WALK'));for(const c of f.state.calls.filter(c=>c.path==='/jev')){const state=JSON.stringify(c.body.state);assert.ok(!state.includes('Synthetic'));assert.ok(!state.includes('@example'));assert.ok(!state.includes('Team1'));}const results=await(await f.api('/api/address-search',{input:'Synthetic Street',languageCode:'en'},f.owner)).json();assert.equal(results.suggestions.length,1);assert.ok(results.suggestions[0].selectionToken);f.state.routeLimit=true;const fail=await f.api('/api/availability',{date:'2030-10-07'});assert.equal(fail.status,400);assert.match((await fail.json()).error,/Google Routes failed \(429\)/);});
 
 test('concurrent conflicting guests produce one provider event',async t=>{const f=await fixture(t);const input={date:'2030-10-07',viewerTimeZone:'Europe/Rome',durationMinutes:30};const slots=await(await f.api('/api/availability',input)).json();const body={...input,...slots.candidates[0],guestName:'Synthetic Guest',guestEmail:'guest@example.test'};const replies=await Promise.all(['race-one-synthetic','race-two-synthetic'].map(idempotencyKey=>f.api('/api/book',{...body,idempotencyKey})));assert.deepEqual(replies.map(r=>r.status).sort(),[201,400]);assert.equal(f.state.creationCount,1);});
 test('stale refresh cannot resurrect a disconnected or replaced account',async t=>{const f=await fixture(t);await new Promise(r=>setTimeout(r,300));const account=f.store.googleAccount('owner@example.test');f.store.refreshGoogle(account.id,account.version,{...account.token,expires_at:0});let release;f.state.refreshGate=new Promise(r=>release=r);const before=f.state.calls.filter(c=>c.path==='/oauth/token').length;const pending=f.api('/api/availability',{date:'2030-10-07'});for(let i=0;i<100&&!f.state.calls.filter(c=>c.path==='/oauth/token').slice(before).length;i++)await new Promise(r=>setTimeout(r,20));assert.ok(f.state.calls.filter(c=>c.path==='/oauth/token').length>before);f.store.disconnectGoogle(account.id);release();assert.equal((await pending).status,400);assert.equal(f.store.googleAccount(account.id),null);});
@@ -47,48 +48,64 @@ test('stale refresh cannot resurrect a disconnected or replaced account',async t
 test('provider success with local confirmation failure reconciles without a second event',async t=>{const f=await fixture(t);const input={date:'2030-10-07',viewerTimeZone:'Europe/Rome',durationMinutes:30};const slots=await(await f.api('/api/availability',input)).json();const body={...input,...slots.candidates[0],guestName:'Synthetic Guest',guestEmail:'guest@example.test',idempotencyKey:'local-commit-failure-key'};f.store.db.exec("CREATE TRIGGER reject_confirmation BEFORE UPDATE OF status ON bookings WHEN NEW.status='confirmed' BEGIN SELECT RAISE(ABORT,'synthetic confirmation failure'); END;");const failed=await f.api('/api/book',body);assert.ok(failed.status>=400);assert.equal(f.state.creationCount,1);assert.equal(f.store.get(body.idempotencyKey).status,'pending');f.store.db.exec('DROP TRIGGER reject_confirmation');const replay=await f.api('/api/book',body);assert.equal(replay.status,200,await replay.clone().text());assert.equal(f.state.creationCount,1);assert.equal(f.store.get(body.idempotencyKey).status,'confirmed');});
 test('SIGTERM drains an in-flight Google creation before exiting',async t=>{const f=await fixture(t);const input={date:'2030-10-07',viewerTimeZone:'Europe/Rome',durationMinutes:30};const slots=await(await f.api('/api/availability',input)).json();let release;f.state.createGate=new Promise(r=>release=r);const body={...input,...slots.candidates[0],guestName:'Synthetic Guest',guestEmail:'guest@example.test',idempotencyKey:'drain-in-flight-creation'};const result=f.api('/api/book',body);for(let i=0;i<100&&!f.state.calls.some(c=>c.path==='/calendar/v3/calendars/primary/events'&&c.method==='POST');i++)await new Promise(r=>setTimeout(r,20));assert.ok(f.state.calls.some(c=>c.path==='/calendar/v3/calendars/primary/events'&&c.method==='POST'));const exit=once(f.child,'exit');f.child.kill('SIGTERM');await new Promise(r=>setTimeout(r,100));assert.equal(f.child.exitCode,null);release();assert.equal((await result).status,201);await exit;assert.equal(f.store.get(body.idempotencyKey).status,'confirmed');});
 
-test('low confidence and alternate route rejection retain authoritative DRIVE fallback',async t=>{const f=await fixture(t,{travel:true});const input={date:'2030-10-07',viewerTimeZone:'Europe/Rome',durationMinutes:30};f.state.jevLow=true;let r=await f.api('/api/availability',input);assert.equal(r.status,200);let v=await r.json();assert.equal(v.travel.adviceSource,'fallback');assert.equal(v.travel.maximumBufferMinutes,20);f.state.jevLow=false;f.state.routeWalkFail=true;r=await f.api('/api/availability',input);assert.equal(r.status,200);v=await r.json();assert.equal(v.travel.adviceSource,'fallback');assert.equal(v.travel.maximumBufferMinutes,20);});
 test('expired or tampered management capability fails before provider access',async t=>{const f=await fixture(t);const key='synthetic-expired-booking';f.store.db.prepare("INSERT INTO bookings (idempotency_key,start,end,buffer_minutes,status,event_id,created_at) VALUES (?,?,?,?,?,?,?)").run(key,'2020-10-07T07:00:00Z','2020-10-07T07:30:00Z',10,'confirmed','synthetic-expired-id','2020-10-01T00:00:00Z');const token=new BookingLinks({secret:'synthetic-key',publicOrigin:'https://book.example.test'}).token(key);const before=f.state.calls.filter(c=>c.path.includes('synthetic-expired-id')).length;let r=await f.api('/api/booking/view',{token});assert.equal(r.status,400);assert.match((await r.json()).error,/no longer available/);r=await f.api('/api/booking/view',{token:token.slice(0,-1)+'!'});assert.equal(r.status,400);assert.match((await r.json()).error,/invalid/);assert.equal(f.state.calls.filter(c=>c.path.includes('synthetic-expired-id')).length,before);});
 
 
-test('missing or invalid route durations never become zero travel and do not erase the month', async t => {
-  const first = new Date();
-  first.setUTCHours(0, 0, 0, 0);
-  first.setUTCDate(first.getUTCDate() + ((8 - first.getUTCDay()) % 7 || 7));
-  const second = new Date(first);
-  second.setUTCDate(second.getUTCDate() + 1);
-  if (first.getUTCMonth() !== second.getUTCMonth()) {
-    first.setUTCDate(first.getUTCDate() + 7);
-    second.setUTCDate(second.getUTCDate() + 7);
-  }
-  const badDate = first.toISOString().slice(0, 10);
-  const goodDate = second.toISOString().slice(0, 10);
-  const f = await fixture(t, {travel: true, travelDates: [badDate, goodDate]});
-  const input = {date: badDate, viewerTimeZone: 'Europe/Rome', durationMinutes: 30};
-  for (const reply of [{}, {routes: []}, {routes: [{}]},
-      {routes: [{duration: ''}]}, {routes: [{duration: 'invalids'}]},
-      {routes: [{duration: '-1s'}]}, {routes: [{duration: 'NaNs'}]}]) {
-    f.state.routeReply = () => reply;
-    const response = await f.api('/api/availability', input);
-    assert.equal(response.status, 400);
-    assert.equal((await response.json()).error, 'Google Routes returned no duration');
-  }
-  for (const duration of ['0s', '0.125s']) {
-    f.state.routeReply = () => ({routes: [{duration, distanceMeters: 0}]});
-    const response = await f.api('/api/availability', input);
-    assert.equal(response.status, 200, await response.clone().text());
-    assert.ok((await response.json()).candidates.length);
-  }
-  f.state.routeReply = body => body.departureTime?.startsWith(badDate)
-    ? {routes: []} : {routes: [{duration: '600s', distanceMeters: 1000}]};
-  const response = await f.api('/api/available-dates', {
-    month: badDate.slice(0, 7), viewerTimeZone: 'Europe/Rome', durationMinutes: 30
-  });
+test('public availability uses saved advice and never calls Jev or routing', async t => {
+  const f = await fixture(t, {travel: true});
+  f.state.routeLimit = true;
+  f.state.jevLow = true;
+  f.store.putSetting('settings', {...f.store.getSetting('settings'), baseLocation: ''});
+  const response = await f.api('/api/availability', {date: '2030-10-07', durationMinutes: 30});
   assert.equal(response.status, 200, await response.clone().text());
-  const month = await response.json();
-  assert.equal(month.partial, true);
-  assert.ok(!month.dates.includes(badDate));
-  assert.ok(month.dates.includes(goodDate), 'Another in-person day must still be checked');
-  assert.ok(f.state.calls.some(call => call.path === '/routes'
-    && call.body.departureTime?.startsWith(goodDate)));
+  const value = await response.json();
+  assert.ok(value.candidates.length);
+  assert.equal(value.travel.routeProvider, 'none');
+  assert.equal(value.travel.adviceSource, 'none');
+  assert.equal(value.travel.maximumBufferMinutes, 10);
+  assert.ok(f.state.calls.every(call => call.path !== '/routes' && call.path !== '/jev'));
+  const addresses = await f.api('/api/address-search', {input:'Synthetic Street', languageCode:'en'}, f.owner);
+  assert.equal(addresses.status, 200);
+  assert.ok((await addresses.json()).suggestions[0].selectionToken);
+});
+
+test('background Jev refresh is due at six hours, stays private and survives a restart', async t => {
+  const f = await fixture(t, {learningAgeMs: 6*60*60*1000+1, jevLow: true});
+  for (let n=0;n<100 && f.store.getSetting('workloadLearning').bookingNotice.source !== 'fallback';n++)
+    await new Promise(resolve=>setTimeout(resolve,20));
+  for (let n=0;n<100 && !f.state.calls.some(call=>call.path==='/jev');n++)
+    await new Promise(resolve=>setTimeout(resolve,20));
+  assert.ok(f.state.calls.some(call=>call.path==='/jev'), 'A stale record refreshes without a page visit');
+  for (let n=0;n<100 && Date.now()-Date.parse(f.store.getSetting('workloadLearning').updatedAt)>5000;n++)
+    await new Promise(resolve=>setTimeout(resolve,20));
+  assert.ok(Date.now()-Date.parse(f.store.getSetting('workloadLearning').updatedAt)<5000);
+  assert.equal(f.store.getSetting('workloadLearning').bookingNotice.source, 'fallback');
+  const before = f.state.calls.filter(call=>call.path==='/jev').length;
+  for (const call of f.state.calls.filter(call=>call.path==='/jev')) {
+    assert.ok(!JSON.stringify(call.body.state).includes('Synthetic'));
+    assert.ok(!JSON.stringify(call.body.state).includes('@example'));
+    assert.ok(!JSON.stringify(call.body.state).includes('Team1'));
+    assert.ok(!call.body.questions.travel_mode);
+  }
+  await f.restart();
+  const response = await f.api('/api/availability', {date:'2030-10-07'});
+  assert.equal(response.status,200);
+  assert.equal(f.state.calls.filter(call=>call.path==='/jev').length, before);
+});
+
+test('month results include the first day and booking still rejects a newly occupied slot', async t => {
+  const f = await fixture(t);
+  const month = new Date().toISOString().slice(0,7);
+  const response = await f.api('/api/available-dates', {month, durationMinutes:30,viewerTimeZone:'Europe/Rome'});
+  assert.equal(response.status,200,await response.clone().text());
+  const value = await response.json();
+  assert.equal(value.partial,false);
+  assert.ok(value.dates.length);
+  assert.equal(value.firstDateAvailability.date,value.dates[0]);
+  const slot = value.firstDateAvailability.candidates[0];
+  f.state.extraBusy = slot;
+  const booking = await f.api('/api/book', {...slot,date:value.dates[0],durationMinutes:30,viewerTimeZone:'Europe/Rome',guestName:'Synthetic Guest',guestEmail:'guest@example.test',idempotencyKey:'new-conflict-after-preview'});
+  assert.ok([400,409].includes(booking.status), await booking.clone().text());
+  assert.equal(f.state.creationCount,0);
+  assert.ok(f.state.calls.every(call=>call.path!=='/routes'&&call.path!=='/jev'));
 });

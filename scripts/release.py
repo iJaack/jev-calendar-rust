@@ -53,6 +53,7 @@ def package():
     release.mkdir(parents=True)
     shutil.copy2(binary, release / 'jev-calendar')
     shutil.copytree(ROOT / 'reference/public', release / 'public')
+    shutil.copytree(ROOT / 'public', release / 'public', dirs_exist_ok=True)
     shutil.copy2(ROOT / 'Cargo.lock', release / 'Cargo.lock')
     shutil.copy2(ROOT / 'rust-toolchain.toml', release / 'rust-toolchain.toml')
     for mode in ['private', 'public']:

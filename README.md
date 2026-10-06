@@ -2,23 +2,34 @@
 
 A native Rust replacement for the current book.jaack.me private API and public gateway. One compiled binary runs in two modes. The booking frontend, SQLite schema, OAuth URLs, encrypted credentials, capability links, host/viewer timezone rules, workload policy and JAACK OS integration remain compatible.
 
-Status on 6 October 2026: production is running Rust in both private API and public gateway modes after Jaack explicitly authorized the full switch. Release `20261006T094423Z-4af31980ad89` serves the original ports, database, frontend and URLs. Independent loopback and public-domain readback verified the Rust marker, Google connection state, protected routes and authenticated JAACK OS reads. A bounded live availability request returned 200 with no offered slots for 7 October under the current policy. A live booking lifecycle remains unverified; no live events or invitations were created by this work.
+Status on 6 October 2026: production is running Rust in both private API and public gateway modes after Jaack explicitly authorized the full switch. Release `20261006T102935Z-734e962a8450` serves the original ports, database and URLs with the current frontend overrides. Both loopback listeners and public-domain health verified the Rust marker. Public browser readback confirmed automatic selection of 8 October, the earliest eligible date, with five time slots and no error. All eight existing booking rows match the consistent pre-deployment backup. A live booking lifecycle remains unverified; no live events or invitations were created by this work.
 
 The exact previous LaunchAgent plists and consistent database backup are retained in `.local/cutover-20261005T213517Z-b4f5df9e9d55`. Node is retained for rollback and is not running either production service. The proposed 48-hour observation period has not elapsed. Activation and readback evidence are in `evidence/cutover*.json`, `evidence/cutover.log` and `evidence/live-functional-readback.json`.
 
 Source maintenance on 6 October removed an unused direct dependency, expanded the advisory and persistence code, and fixed release baseline checks after production status documentation changes. Release tooling now records the previous backend, so failed upgrades and rollback can restore an earlier Rust release as well as Node. That maintenance pass did not restart the then-active initial release.
 
-On 6 October, the public month calendar failed when Google Routes returned no usable duration. Route decoding now rejects missing/invalid durations with a controlled provider error. Month scanning withholds the affected day, reports partial availability and continues checking other dates, including other days with in-person events. Explicit zero/fractional durations remain valid. The regression failed against the prior binary and passed with the fix. This behavior intentionally differs from the Node oracle, which silently converted missing durations to zero travel. Public browser readback verified 16 selectable October dates and live slots at 15:35 and 16:05 Europe/Rome on 9 October. Both listeners and public-domain health returned Rust; all eight existing booking rows remained identical. The previous Rust release is retained in the latest cutover directory, alongside the original Node rollback material.
+Earlier on 6 October, the public month calendar failed when Google Routes returned no usable duration. Route decoding now rejects missing/invalid durations with a controlled provider error. Month scanning withholds the affected day, reports partial availability and continues checking other dates, including other days with in-person events. Explicit zero/fractional durations remain valid. The regression failed against the prior binary and passed with the fix. This behavior intentionally differs from the Node oracle, which silently converted missing durations to zero travel. Public browser readback verified 16 selectable October dates and live slots at 15:35 and 16:05 Europe/Rome on 9 October. Both listeners and public-domain health returned Rust; all eight existing booking rows remained identical. The previous Rust release is retained in the latest cutover directory, alongside the original Node rollback material.
+
+## Earliest dates and background advice
+
+The latest live read-only sample measured October month availability at 1.556 seconds, compared with the earlier 14.292-second sample; these are individual timings, not latency percentiles. Seventeen dates are eligible after routing removal. The saved advice timestamp stayed unchanged across verification visits and a deployment restart. Its next six-hour deadline is 18:25 Europe/Rome on 6 October. The six-hour/restart behavior has automated coverage; a complete six-hour production cycle has not elapsed. Current readback is retained in `evidence/background-readback.json`.
+
+The booking page opens the earliest available date, preserving an explicitly selected date during a refresh. The month response includes `firstDateAvailability`, so the initial time slots reuse the fresh month calculation without a second calendar request. Booking creation and changes still read current calendars and verify conflicts before reserving a slot.
+
+Google Routes and per-visit Jev travel advice are removed. Configured minimum spacing between meetings remains enforced against calendar conflicts. The private service worker refreshes aggregate Jev workload advice every six hours, using the persisted refresh timestamp across restarts; public visits and settings/timezone/rule saves do not run Jev. An explicit private manual workload refresh remains available. Until a changed policy is refreshed, the configured notice floor and deterministic workload rules apply. The saved eight-hour notice and twenty-minute buffer are unchanged by this implementation.
+
+Current browser overrides live in `public/`; the immutable Node oracle remains in `reference/`. Release packaging overlays these files onto the captured assets and checksums the result. Privacy and private-dashboard text reflect the background cadence and removed routing.
 
 ## Layout
 
 - `src/`: native HTTP, persistence, cryptography, scheduling, workload, provider and booking implementations.
 - `reference/`: generated SHA-256 identified snapshot of the existing Node source and unchanged browser assets, including its pre-existing local edits. No production secrets or databases.
+- `public/`: current booking, privacy and private-dashboard overrides.
 - `fixtures/`: synthetic default rules, exact bounded Jev questions and the compressed immutable Node baseline.
 - `tests/`: cross-language comparisons, preserved HTTP assertions, local fake-provider failure injection, gateway and release rehearsals.
 - `scripts/release.py`: checksum packaging, read-only preflight, consistent SQLite backup, guarded LaunchAgent activation and rollback.
 - `evidence/`: retained build/check/test logs, synthetic comparison results, screenshots and local benchmark.
-- `dist/`: packaged binary and unchanged assets. Release identity is recorded in `evidence/release-path.txt`.
+- `dist/`: packaged binary and checksummed frontend assets. Release identity is recorded in `evidence/release-path.txt`.
 
 ## Build and validate
 
@@ -34,11 +45,12 @@ node tests/differential.mjs
 node tests/http-compat.mjs
 node --test --test-concurrency=1 tests/providers.mjs
 node --test tests/gateway.mjs
+node --test tests/frontend.mjs
 cargo build --release --locked -j 2
 python3 tests/release.py
 ```
 
-Node is used only as a test oracle and retained rollback implementation. The Rust services execute no Node process. The preserved Node baseline passed all 80 tests and syntax checks. Rust validation passed three native unit tests, 5,920 deterministic comparisons across nine timezones/DST dates, six preserved HTTP compatibility tests, eleven fake-provider integration tests, one gateway suite and six release/reference rehearsal tests. Tests use disposable SQLite databases, synthetic credentials and loopback providers.
+Node is used only as a test oracle and retained rollback implementation. The Rust services execute no Node process. The preserved Node baseline passed all 80 tests and syntax checks. Rust validation passed four native unit tests, 5,920 deterministic comparisons across nine timezones/DST dates, six preserved HTTP compatibility tests, eleven fake-provider integration tests, one gateway suite and seven release/reference rehearsal tests and three frontend regressions. Tests use disposable SQLite databases, synthetic credentials and loopback providers.
 
 The fake-provider suite verifies hidden/shared calendars, pagination, 50-calendar free/busy batching, incomplete-provider fail-closed behavior, single-use OAuth and pinned owner, stale refresh rejection, original event/account/Meet preservation, ETag changes, attendee updates, creation/cancellation lost-response recovery, conflicting guests, local confirmation failure, restart recovery and SIGTERM drain. Gateway coverage checks route/method isolation, origin/host/header/body validation, credential stripping and rate limits.
 
@@ -69,7 +81,7 @@ python3 scripts/release.py inspect --database /absolute/path/to/database.sqlite
 python3 scripts/release.py backup --database /absolute/path/to/database.sqlite --destination /new/private/backup.sqlite
 ```
 
-The package contains a release binary, unchanged assets, lockfile, toolchain record, launch wrappers and SHA-256 manifest. Wrappers read the existing private .env in its existing checkout; secrets are not copied into the package. The Cloudflare Tunnel, Tailscale owner origin, OAuth redirect and ports remain stable.
+The package contains a release binary, captured assets with current frontend overrides, lockfile, toolchain record, launch wrappers and SHA-256 manifest. Wrappers read the existing private .env in its existing checkout; secrets are not copied into the package. The Cloudflare Tunnel, Tailscale owner origin, OAuth redirect and ports remain stable.
 
 After production cutover authorization, use the verified release path and actual production database:
 

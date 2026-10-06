@@ -1,26 +1,4 @@
 {
-  "travel": {
-    "travel_mode": {
-      "type": "choice",
-      "instructions": "Choose a practical travel mode using the rounded driving duration and distance. Consider direction and candidate times. Do not infer addresses or assume transit service is available.",
-      "criteria": {
-        "DRIVE": "car or taxi",
-        "WALK": "walking",
-        "BICYCLE": "bicycle",
-        "TRANSIT": "public transit"
-      }
-    },
-    "extra_buffer": {
-      "type": "choice",
-      "instructions": "Choose a conservative extra arrival margin using the trip direction and candidate times. This is added on top of the authoritative route duration and owner minimum buffer.",
-      "criteria": {
-        "MIN_0": "0 extra minutes",
-        "MIN_5": "5 extra minutes",
-        "MIN_10": "10 extra minutes",
-        "MIN_15": "15 extra minutes"
-      }
-    }
-  },
   "notice": {
     "booking_notice": {
       "type": "choice",

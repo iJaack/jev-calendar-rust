@@ -21,6 +21,15 @@ use std::{
 };
 use subtle::ConstantTimeEq;
 
+const WORKLOAD_REFRESH_MS: i64 = 6 * 60 * 60 * 1000;
+
+fn workload_refresh_remaining(saved: &Value, time: i64) -> i64 {
+    epoch(&text(saved, "updatedAt"))
+        .filter(|updated| *updated <= time)
+        .map(|updated| (WORKLOAD_REFRESH_MS - (time - updated)).max(0))
+        .unwrap_or(0)
+}
+
 pub struct App {
     pub db: Arc<Store>,
     pub providers: Providers,
@@ -290,27 +299,13 @@ impl App {
         }
         preliminary.retain(|v| epoch(&text(v, "start")).is_some_and(|t| t >= va && t < vb));
         preliminary.sort_by_key(|v| epoch(&text(v, "start")));
-        let travel = advisory::constraints(
-            &self.providers,
-            self.demo,
-            &events,
-            &text(&settings, "baseLocation"),
-            &preliminary,
-            number(&settings, "minimumTravelBufferMinutes"),
-        )
-        .await?;
-        let safe: Vec<_> = preliminary
-            .into_iter()
-            .filter(|v| {
-                s::constraint(
-                    &text(v, "start"),
-                    &text(v, "end"),
-                    &array(&travel["constraints"]),
-                    number(&settings, "minimumTravelBufferMinutes"),
-                )
-                .is_none()
-            })
-            .collect();
+        let travel = json!({
+            "eventCount": events.iter().filter(|event| event["inPerson"] == true).count(),
+            "maximumBufferMinutes": settings["minimumTravelBufferMinutes"],
+            "routeProvider": "none",
+            "adviceSource": "none",
+        });
+        let safe = preliminary;
         let feedback = if let Some(snapshot) = snapshot {
             array(&snapshot["feedback"])
         } else {
@@ -407,42 +402,16 @@ impl App {
         };
         let mut dates = vec![];
         let mut preferences = vec![];
-        let mut partial = false;
-        let mut route_limited = false;
+        let mut first_availability = Value::Null;
         for day in days {
-            if route_limited && let Some(snapshot) = &snapshot {
-                let first = s::date(s::zoned(&day, 0.0, &viewer)?, &zone)?;
-                let last = s::date(s::zoned(&day, 24.0, &viewer)? - 1, &zone)?;
-                let a = iso(s::zoned(&first, 0.0, &zone)?);
-                let b = iso(s::zoned(&last, 24.0, &zone)?);
-                if array(&snapshot["events"])
-                    .iter()
-                    .any(|e| e["inPerson"] == true && s::overlaps(&a, &b, e))
-                {
-                    continue;
-                }
-            }
             let avail = self
                 .availability(
-                    &json!({"date":day,"durationMinutes":duration,"viewerTimeZone":viewer}),
+                    &json!({"date": day, "durationMinutes": duration, "viewerTimeZone": viewer}),
                     calendar.as_ref(),
                     snapshot.as_ref(),
                     12,
                 )
-                .await;
-            let avail = match avail {
-                Ok(v) => v,
-                Err(e) if e.to_string() == "Google Routes failed (429)" => {
-                    partial = true;
-                    route_limited = true;
-                    continue;
-                }
-                Err(e) if e.to_string() == "Google Routes returned no duration" => {
-                    partial = true;
-                    continue;
-                }
-                Err(e) => return Err(e),
-            };
+                .await?;
             if !array(&avail["candidates"]).is_empty() {
                 let date = s::date(
                     epoch(&text(&avail["candidates"][0], "start"))
@@ -452,6 +421,9 @@ impl App {
                 let score = w::preference(
                     &json!({"day":date,"zone":zone,"hours":settings["hours"],"busy":snapshot.as_ref().map(|s|s["busy"].clone()).unwrap_or(json!([])),"events":snapshot.as_ref().map(|s|s["events"].clone()).unwrap_or(json!([])),"rules":rules}),
                 )?;
+                if first_availability.is_null() {
+                    first_availability = avail.clone();
+                }
                 dates.push(day.clone());
                 preferences.push((day, score))
             }
@@ -460,7 +432,8 @@ impl App {
         preferences.sort_by(|a, b| b.1.total_cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
         result["dates"] = json!(dates);
         result["recommendedDate"] = json!(preferences.first().map(|p| &p.0));
-        result["partial"] = json!(partial);
+        result["partial"] = json!(false);
+        result["firstDateAvailability"] = first_availability;
         Ok(result)
     }
     async fn refresh_workload(&self) -> Result<Value> {
@@ -541,8 +514,7 @@ impl App {
         let saved = self.db.setting("workloadLearning", Value::Null)?;
         let zone = text(&settings, "timezone");
         if saved["signature"] == Self::signature(&settings, &rules, &zone)
-            && epoch(&text(&saved, "updatedAt")).and_then(|t| s::date(t, &zone).ok())
-                == Some(s::date(now(), &zone)?)
+            && workload_refresh_remaining(&saved, now()) > 0
         {
             return Ok(());
         }
@@ -839,7 +811,6 @@ impl App {
             if method == Method::PUT {
                 let rules = w::normalize(&input["rules"])?;
                 self.db.put("projectRules", &json!(rules))?;
-                self.refresh_due().await?;
                 return Ok(response(200, json!({"ok":true,"rules":rules})));
             }
             let learned = self.refresh_workload().await?;
@@ -905,7 +876,6 @@ impl App {
                 "End hour must be after start hour"
             );
             self.db.put("settings", &settings)?;
-            self.refresh_due().await?;
             return Ok(response(200, json!({"ok":true,"settings":settings})));
         }
         if method == Method::PUT && path == "/api/timezone" {
@@ -917,7 +887,6 @@ impl App {
                 &json!({"timezone":zone,"timezoneSource":"owner-device","timezoneUpdatedAt":updated}),
             );
             self.db.put("settings", &settings)?;
-            self.refresh_due().await?;
             return Ok(response(
                 200,
                 json!({"ok":true,"timezone":zone,"source":"owner-device","updatedAt":updated}),
@@ -1401,9 +1370,14 @@ pub async fn run() -> Result<()> {
         Some(tokio::spawn(async move {
             loop {
                 if app.refresh_due().await.is_err() {
-                    eprintln!("Daily workload refresh failed");
+                    eprintln!("Background workload refresh failed");
                 }
-                tokio::time::sleep(Duration::from_secs(3600)).await;
+                let saved = app
+                    .db
+                    .setting("workloadLearning", Value::Null)
+                    .unwrap_or(Value::Null);
+                let wait = workload_refresh_remaining(&saved, now()).max(60_000);
+                tokio::time::sleep(Duration::from_millis(wait as u64)).await;
             }
         }))
     } else {
@@ -1485,4 +1459,41 @@ fn evaluate() -> Result<()> {
         writeln!(out, "{result}")?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod background_tests {
+    use super::*;
+
+    #[test]
+    fn refresh_deadline_survives_midnight_and_restarts() {
+        let updated = epoch("2030-10-07T23:00:00Z").unwrap();
+        let saved = json!({"updatedAt": iso(updated)});
+        assert_eq!(
+            workload_refresh_remaining(&saved, updated),
+            WORKLOAD_REFRESH_MS
+        );
+        assert_eq!(
+            workload_refresh_remaining(&saved, updated + 2 * 60 * 60 * 1000),
+            4 * 60 * 60 * 1000
+        );
+        assert_eq!(
+            workload_refresh_remaining(&saved, updated + WORKLOAD_REFRESH_MS - 1),
+            1
+        );
+        assert_eq!(
+            workload_refresh_remaining(&saved, updated + WORKLOAD_REFRESH_MS),
+            0
+        );
+        assert_eq!(
+            workload_refresh_remaining(&saved, updated + WORKLOAD_REFRESH_MS + 1),
+            0
+        );
+        assert_eq!(workload_refresh_remaining(&saved, updated - 1), 0);
+        assert_eq!(workload_refresh_remaining(&Value::Null, updated), 0);
+        assert_eq!(
+            workload_refresh_remaining(&json!({"updatedAt": "invalid"}), updated),
+            0
+        );
+    }
 }
