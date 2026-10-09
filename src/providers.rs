@@ -52,6 +52,13 @@ pub struct Calendar {
     pub destination: String,
     lists: tokio::sync::Mutex<HashMap<String, Vec<Value>>>,
 }
+fn blocks_time(event: &Value) -> bool {
+    event["status"] != "cancelled"
+        && event["transparency"] != "transparent"
+        && !array(&event["attendees"])
+            .iter()
+            .any(|a| a["self"] == true && a["responseStatus"] == "declined")
+}
 impl Providers {
     pub fn new(db: Arc<Store>, env: HashMap<String, String>) -> Result<Self> {
         if let Some(origin) = env.get("JEV_TEST_PROVIDER_ORIGIN") {
@@ -297,6 +304,54 @@ impl Providers {
         lists.insert(id, result.clone());
         Ok(result)
     }
+    async fn calendar_events(
+        &self,
+        account: &Value,
+        calendar_id: &str,
+        start: &str,
+        end: &str,
+    ) -> Result<(Vec<Value>, String)> {
+        let mut events = Vec::new();
+        let mut page = String::new();
+        let mut timezone = String::new();
+        loop {
+            let path = format!("/calendars/{}/events", encode(calendar_id));
+            let mut url = url::Url::parse(&format!("https://local.invalid{path}"))?;
+            url.query_pairs_mut().extend_pairs([
+                ("timeMin", start),
+                ("timeMax", end),
+                ("singleEvents", "true"),
+                ("orderBy", "startTime"),
+                ("showDeleted", "false"),
+                ("maxResults", "2500"),
+            ]);
+            if !page.is_empty() {
+                url.query_pairs_mut().append_pair("pageToken", &page);
+            }
+            let v = self
+                .request(
+                    account,
+                    reqwest::Method::GET,
+                    &format!("{path}?{}", url.query().unwrap_or("")),
+                    None,
+                    None,
+                )
+                .await?;
+            ensure!(
+                v["items"].is_array(),
+                "Unable to read every Google calendar event."
+            );
+            events.extend(array(&v["items"]));
+            if v["timeZone"].is_string() {
+                timezone = text(&v, "timeZone");
+            }
+            page = text(&v, "nextPageToken");
+            if page.is_empty() {
+                break;
+            }
+        }
+        Ok((events, timezone))
+    }
     pub async fn free_busy(
         &self,
         calendar: &Calendar,
@@ -320,6 +375,40 @@ impl Providers {
                     let v=self.request(account,reqwest::Method::POST,"/freeBusy",Some(&json!({"timeMin":start,"timeMax":end,"calendarExpansionMax":50,"items":items})),None).await?;
                     for c in batch {
                         let entry = &v["calendars"][text(c, "id")];
+                        let errors = array(&entry["errors"]);
+                        // Some subscribed calendars support Events but not FreeBusy. Never
+                        // drop their coverage: derive conflicts only after a complete event read.
+                        if text(c, "id").ends_with("@group.v.calendar.google.com")
+                            && matches!(
+                                c["accessRole"].as_str(),
+                                Some("reader" | "writer" | "owner")
+                            )
+                            && !errors.is_empty()
+                            && errors.iter().all(|e| e["reason"] == "notFound")
+                        {
+                            let (events, timezone) = self
+                                .calendar_events(account, &text(c, "id"), &start, &end)
+                                .await?;
+                            for e in events.into_iter().filter(blocks_time) {
+                                let boundary = |field: &str| -> Result<i64> {
+                                    if e[field]["dateTime"].is_string() {
+                                        epoch(&text(&e[field], "dateTime"))
+                                            .ok_or_else(|| anyhow!("Invalid calendar event time"))
+                                    } else {
+                                        crate::scheduling::zoned(
+                                            &text(&e[field], "date"),
+                                            0.0,
+                                            &timezone,
+                                        )
+                                    }
+                                };
+                                let event_start = boundary("start")?;
+                                let event_end = boundary("end")?;
+                                ensure!(event_start < event_end, "Invalid calendar event range");
+                                result.push(json!({"start":crate::iso(event_start),"end":crate::iso(event_end)}));
+                            }
+                            continue;
+                        }
                         ensure!(
                             entry.is_object()
                                 && array(&entry["errors"]).is_empty()
@@ -353,56 +442,24 @@ impl Providers {
             let reads = futures_util::stream::iter(calendars)
                 .map(|c| async move {
                     let mut result = Vec::new();
-                    let mut page = String::new();
-                    loop {
-                        let path = format!("/calendars/{}/events", encode(&text(&c, "id")));
-                        let mut url = url::Url::parse(&format!("https://local.invalid{path}"))?;
-                        url.query_pairs_mut().extend_pairs([
-                            ("timeMin", start),
-                            ("timeMax", end),
-                            ("singleEvents", "true"),
-                            ("orderBy", "startTime"),
-                            ("showDeleted", "false"),
-                            ("maxResults", "2500"),
-                        ]);
-                        if !page.is_empty() {
-                            url.query_pairs_mut().append_pair("pageToken", &page);
+                    let (items, _) = self.calendar_events(account, &text(&c, "id"), start, end).await?;
+                    for e in items {
+                        if !blocks_time(&e)
+                            || !e["start"]["dateTime"].is_string()
+                            || !e["end"]["dateTime"].is_string()
+                        {
+                            continue;
                         }
-                        let v = self
-                            .request(
-                                account,
-                                reqwest::Method::GET,
-                                &format!("{path}?{}", url.query().unwrap_or("")),
-                                None,
-                                None,
-                            )
-                            .await?;
-                        for e in array(&v["items"]) {
-                            if e["status"] == "cancelled"
-                                || e["transparency"] == "transparent"
-                                || array(&e["attendees"])
-                                    .iter()
-                                    .any(|a| a["self"] == true && a["responseStatus"] == "declined")
-                                || !e["start"]["dateTime"].is_string()
-                                || !e["end"]["dateTime"].is_string()
-                            {
-                                continue;
-                            }
-                            let location = text(&e, "location").trim().to_owned();
-                            let mut event = json!({"start":e["start"]["dateTime"],"end":e["end"]["dateTime"],"location":location,"inPerson":physical(&location)});
-                            if workload {
-                                event["summary"] =
-                                    json!(text(&e, "summary").chars().take(500).collect::<String>());
-                                event["calendarId"] = c["id"].clone();
-                                event["calendarName"] =
-                                    json!(text(&c, "summary").chars().take(200).collect::<String>());
-                            }
-                            result.push(event);
+                        let location = text(&e, "location").trim().to_owned();
+                        let mut event = json!({"start":e["start"]["dateTime"],"end":e["end"]["dateTime"],"location":location,"inPerson":physical(&location)});
+                        if workload {
+                            event["summary"] =
+                                json!(text(&e, "summary").chars().take(500).collect::<String>());
+                            event["calendarId"] = c["id"].clone();
+                            event["calendarName"] =
+                                json!(text(&c, "summary").chars().take(200).collect::<String>());
                         }
-                        page = text(&v, "nextPageToken");
-                        if page.is_empty() {
-                            break;
-                        }
+                        result.push(event);
                     }
                     Ok::<_, anyhow::Error>(result)
                 })
