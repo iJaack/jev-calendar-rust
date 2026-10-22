@@ -323,14 +323,15 @@ html[data-theme="dark"]:has(body.booking-page) {
 .weekdays {
   margin-bottom: var(--jk-s2);
   color: var(--jk-t2);
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 650;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.04em;
   text-align: center;
   text-transform: uppercase;
 }
 .calendar-grid {
   align-content: start;
+  min-height: 262px;
 }
 .calendar-grid button {
   position: relative;
@@ -476,6 +477,7 @@ html[data-theme="dark"]:has(body.booking-page) {
   font-size: var(--jk-fs-sm);
 }
 .times-list {
+  min-height: 360px;
   max-height: 360px;
   overflow: auto;
   padding: 2px 4px 2px 0;
@@ -760,6 +762,14 @@ html[data-theme="dark"]:has(body.booking-page) {
   color: var(--jk-accent-text);
   text-underline-offset: 3px;
 }
+.booking-page a.skip-link,
+.booking-page a.skip-link:visited,
+.booking-page a.skip-link:hover,
+.booking-page a.skip-link:focus,
+.booking-page a.skip-link:focus-visible {
+  background: var(--jk-accent);
+  color: var(--on-accent);
+}
 .privacy-page .updated {
   color: var(--jk-t2);
   font-size: var(--jk-fs-note);
@@ -887,6 +897,21 @@ html[data-theme="dark"]:has(body.booking-page) {
   }
   .calendar {
     max-width: none;
+  }
+}
+
+@media (max-width: 760px) {
+  .booking-page .jk-thsw button {
+    min-width: 36px;
+    min-height: 36px;
+    padding: 0 6px;
+  }
+}
+
+@media (max-width: 359px) {
+  .weekdays,
+  .calendar-grid {
+    gap: 1px;
   }
 }
 

@@ -4,4 +4,4 @@
 .jk-thsw button[aria-pressed="true"]{background:var(--jk-bg);color:var(--jk-ink);box-shadow:0 1px 3px rgba(0,0,0,.12)}
 .jk-thsw button:focus-visible{outline:2px solid var(--jk-accent);outline-offset:1px}
 .jk-thsw .i{display:none}
-@media (max-width:760px){.jk-thsw .i{display:inline}.jk-thsw .l{display:none}.jk-thsw button{padding:6px 8px;font-size:13px}}
+@media (max-width:760px){.jk-thsw{gap:1px;padding:1px}.jk-thsw .i{display:inline}.jk-thsw .l{display:none}.jk-thsw button{min-width:36px;min-height:36px;padding:0 6px;font-size:13px}}
