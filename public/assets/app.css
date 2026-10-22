@@ -1,0 +1,825 @@
+/* Booking presentation on the jaack design system.
+   Package version 2026-10-22. Provenance and SHA-256: vendor/jaack-design-system/VENDOR.md.
+   Served bundles: /assets/jaack/jaack.css, jaack.js, theme.js.
+   Tokens, type, glass, top bar and background come from that package.
+   This file only lays out the booking, privacy and guest-management pages. */
+
+.booking-page {
+  --jk-topbar-h: 84px;
+  --on-accent: #171710;
+}
+
+.booking-page .jk-page {
+  max-width: 1120px;
+}
+
+/* One reading column. A booking page is a sequence, not a dashboard grid. */
+.booking-page .jk-chs {
+  grid-template-columns: minmax(0, 1fr);
+}
+.booking-page .jk-ch + .jk-ch {
+  border-left: 0;
+  margin-left: 0;
+  padding-left: 0;
+}
+
+.booking-page p {
+  margin: 0;
+}
+
+.hidden {
+  display: none !important;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.skip-link {
+  position: fixed;
+  z-index: 80;
+  left: 12px;
+  top: 12px;
+  padding: 10px 14px;
+  border-radius: var(--jk-r-pill);
+  background: var(--jk-accent);
+  color: var(--on-accent);
+  font-weight: 700;
+  text-decoration: none;
+  transform: translateY(-160%);
+}
+.skip-link:focus {
+  transform: none;
+}
+
+.booking-page :focus-visible {
+  outline: 2px solid var(--jk-accent-text);
+  outline-offset: 3px;
+}
+.booking-page .jk-thsw button:focus-visible,
+.booking-page .jk-top a:focus-visible {
+  outline: 2px solid var(--jk-accent-text);
+  outline-offset: 2px;
+}
+
+/* Theme switch sits in the top bar. Give it a ~40 px target. */
+.booking-page .jk-thsw button {
+  min-height: 40px;
+  min-width: 40px;
+  padding: 8px 12px;
+}
+
+.booking-page ::selection {
+  background: var(--jk-accent);
+  color: var(--on-accent);
+}
+
+/* Host line sits on the page, under the chapter question. */
+.book-host {
+  display: flex;
+  align-items: center;
+  gap: var(--jk-s3);
+  margin-top: var(--jk-hero-gap);
+}
+.host-avatar {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  object-fit: cover;
+  object-position: center 30%;
+  flex: none;
+}
+.book-host p {
+  color: var(--jk-t2);
+  font-size: var(--jk-fs-note);
+  line-height: 1.4;
+}
+
+.book-tools {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--jk-s4);
+  flex-wrap: wrap;
+  margin-top: var(--jk-group-gap);
+}
+.field-label {
+  display: block;
+  margin-bottom: var(--jk-s2);
+  color: var(--jk-t2);
+  font-size: var(--jk-fs-xs);
+  font-weight: 700;
+  letter-spacing: var(--jk-track-label);
+  text-transform: uppercase;
+}
+
+/* Segmented length control. A flat pill, not a second glass panel. */
+.duration-options {
+  display: inline-flex;
+  gap: 2px;
+  padding: 3px;
+  border-radius: var(--jk-r-pill);
+  background: var(--jk-surface-2);
+}
+.duration-option {
+  min-width: 64px;
+  min-height: 40px;
+  padding: 8px 14px;
+  border: 0;
+  border-radius: var(--jk-r-pill);
+  background: transparent;
+  color: var(--jk-ink-2);
+  font: 600 14px/1 var(--jk-font);
+  cursor: pointer;
+}
+.duration-option:hover {
+  color: var(--jk-ink);
+}
+.duration-option.selected {
+  background: var(--jk-accent);
+  color: var(--on-accent);
+}
+.duration-option.selected:hover {
+  color: var(--on-accent);
+}
+
+.live-calendar {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 40px;
+  color: var(--jk-t2);
+  font-size: var(--jk-fs-xs);
+  font-weight: 700;
+  letter-spacing: var(--jk-track-label);
+  text-transform: uppercase;
+}
+.live-calendar i {
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  background: var(--jk-ok);
+  flex: none;
+}
+
+.date-time-grid {
+  display: grid;
+  gap: var(--jk-s7);
+  margin-top: var(--jk-s6);
+  max-width: 820px;
+}
+.calendar {
+  min-width: 0;
+  max-width: 420px;
+}
+.calendar-nav {
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr) 40px;
+  align-items: center;
+  min-height: 40px;
+  margin-bottom: var(--jk-s3);
+}
+.calendar-nav strong {
+  text-align: center;
+  font-size: var(--jk-fs-body);
+  font-weight: 650;
+  letter-spacing: -0.02em;
+}
+.calendar-nav button,
+.back-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-width: 40px;
+  min-height: 40px;
+  padding: 8px;
+  border: 0;
+  border-radius: var(--jk-r-pill);
+  background: transparent;
+  color: var(--jk-ink);
+  font: 600 14px/1 var(--jk-font);
+  cursor: pointer;
+}
+.calendar-nav button:hover,
+.back-button:hover {
+  background: var(--jk-surface-2);
+}
+.calendar-nav button:disabled {
+  visibility: hidden;
+}
+.calendar-nav svg,
+.back-button svg {
+  width: 20px;
+  height: 20px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.back-button {
+  justify-content: flex-start;
+  margin: 0 0 var(--jk-s4);
+  padding-left: 2px;
+  padding-right: 12px;
+}
+
+.weekdays,
+.calendar-grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 2px;
+}
+.weekdays {
+  margin-bottom: var(--jk-s2);
+  color: var(--jk-t2);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-align: center;
+}
+.calendar-grid {
+  align-content: start;
+}
+.calendar-grid button {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 44px;
+  min-height: 40px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--jk-r-xs);
+  background: transparent;
+  color: var(--jk-ink);
+  font: 600 15px/1 var(--jk-font);
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+}
+.calendar-grid button:not(:disabled):hover {
+  background: var(--jk-surface-2);
+}
+.calendar-grid button:disabled {
+  color: var(--jk-t3);
+  cursor: default;
+  opacity: 1;
+}
+.calendar-grid button.today:not(.selected) {
+  box-shadow: inset 0 0 0 1.5px var(--jk-ink-2);
+}
+.calendar-grid button.recommended:not(.selected) {
+  color: var(--jk-accent-text);
+}
+.calendar-grid button.recommended:not(.selected)::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  bottom: 5px;
+  width: 4px;
+  height: 4px;
+  margin-left: -2px;
+  border-radius: 1px;
+  background: var(--jk-accent-text);
+}
+.calendar-grid button.selected {
+  background: var(--jk-accent);
+  color: var(--on-accent);
+  box-shadow: none;
+}
+.calendar-grid button.selected:not(:disabled):hover {
+  background: var(--jk-accent);
+  color: var(--on-accent);
+}
+
+.book-key {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: var(--jk-s3);
+  color: var(--jk-t2);
+  font-size: var(--jk-fs-sm);
+}
+.book-key .is-today,
+.book-key .is-suggested {
+  display: inline-block;
+  flex: none;
+}
+.book-key .is-today {
+  width: 14px;
+  height: 14px;
+  border-radius: 4px;
+  box-shadow: inset 0 0 0 1.5px var(--jk-ink-2);
+}
+.book-key .is-suggested {
+  width: 4px;
+  height: 4px;
+  border-radius: 1px;
+  background: var(--jk-accent-text);
+}
+.book-key .gap {
+  width: 8px;
+}
+
+.timezone-row,
+.details-form label,
+.reschedule-fields label {
+  display: grid;
+  gap: 6px;
+  margin-top: var(--jk-s4);
+  color: var(--jk-t2);
+  font-size: var(--jk-fs-xs);
+  font-weight: 700;
+  letter-spacing: var(--jk-track-label);
+  text-transform: uppercase;
+}
+.booking-page input,
+.booking-page select {
+  width: 100%;
+  min-width: 0;
+  min-height: 44px;
+  padding: 8px 2px;
+  border: 0;
+  border-bottom: 1.5px solid var(--jk-ink-2);
+  border-radius: 0;
+  background: transparent;
+  color: var(--jk-ink);
+  font: 500 16px/1.3 var(--jk-font);
+  letter-spacing: 0;
+  text-transform: none;
+}
+.booking-page input::placeholder {
+  color: var(--jk-t2);
+  opacity: 1;
+}
+.booking-page input:focus,
+.booking-page select:focus {
+  border-bottom-color: var(--jk-accent-text);
+}
+.booking-page input:-webkit-autofill {
+  -webkit-text-fill-color: var(--jk-ink);
+  caret-color: var(--jk-ink);
+  box-shadow: inset 0 0 0 1000px var(--jk-bg);
+}
+
+.times-panel {
+  min-width: 0;
+}
+.times-date {
+  display: flex;
+  align-items: center;
+  min-height: 40px;
+  margin: 0;
+  color: var(--jk-ink);
+  font-size: var(--jk-fs-body);
+  font-weight: 650;
+  letter-spacing: -0.02em;
+}
+.times-hint {
+  display: block;
+  margin: 0 0 var(--jk-s2);
+  color: var(--jk-t3);
+  font-size: var(--jk-fs-sm);
+}
+.times-list {
+  max-height: 360px;
+  overflow: auto;
+  padding: 2px 4px 2px 0;
+  border-bottom: 1px solid var(--jk-hair);
+  scrollbar-width: thin;
+  scrollbar-color: var(--jk-ink-2) transparent;
+}
+.times-empty {
+  margin: 0;
+  padding: var(--jk-s3) 0;
+  color: var(--jk-t2);
+  font-size: var(--jk-fs-note);
+  line-height: 1.45;
+}
+.time-choice {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  border-top: 1px solid var(--jk-hair);
+}
+.time-button,
+.next-button {
+  border: 0;
+  background: transparent;
+  font: 600 15px/1 var(--jk-font);
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+}
+.time-button {
+  min-height: 44px;
+  padding: 8px 4px;
+  color: var(--jk-ink);
+  text-align: left;
+}
+.time-button:hover {
+  color: var(--jk-accent-text);
+}
+.next-button {
+  width: 0;
+  min-width: 0;
+  padding: 0;
+  overflow: hidden;
+  opacity: 0;
+  pointer-events: none;
+}
+.time-choice.selected .time-button {
+  color: var(--jk-ink);
+  font-weight: 700;
+}
+.time-choice.selected .next-button {
+  width: auto;
+  min-width: 76px;
+  min-height: 36px;
+  margin: 4px 0;
+  padding: 0 14px;
+  border-radius: var(--jk-r-pill);
+  background: var(--jk-accent);
+  color: var(--on-accent);
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.loading-times {
+  display: grid;
+  gap: 8px;
+  padding: 8px 0;
+}
+.loading-times i {
+  display: block;
+  height: 40px;
+  border-radius: var(--jk-r-xs);
+  background: var(--jk-hair);
+  animation: book-pulse 1s ease-in-out infinite alternate;
+}
+@keyframes book-pulse {
+  to { opacity: 0.45; }
+}
+
+.inline-status,
+.status {
+  margin: var(--jk-s3) 0 0;
+  color: var(--jk-t2);
+  font-size: var(--jk-fs-note);
+  font-weight: 600;
+  line-height: 1.45;
+}
+.inline-status.error,
+.status.error {
+  color: var(--jk-fail);
+  font-weight: 700;
+}
+.retry-dates {
+  margin-top: var(--jk-s3);
+  min-height: 40px;
+  padding: 8px 14px;
+  border: 0;
+  border-radius: var(--jk-r-pill);
+  background: transparent;
+  box-shadow: inset 0 0 0 1.5px var(--jk-ink-2);
+  color: var(--jk-ink);
+  font: 650 14px/1 var(--jk-font);
+  cursor: pointer;
+}
+.retry-dates:hover {
+  background: var(--jk-surface-2);
+}
+
+/* The booking form is the one glass panel on this screen. */
+.book-form {
+  max-width: 520px;
+}
+.book-form h2,
+.success-step h2,
+.manage-page .jk-cb h2,
+.privacy-page .jk-cb h2 {
+  margin: 0;
+  font-size: clamp(22px, 2vw, 28px);
+  font-weight: 750;
+  letter-spacing: var(--jk-track-title);
+  line-height: 1.15;
+}
+.book-form .jk-lab {
+  margin-bottom: var(--jk-s2);
+}
+.selected-summary {
+  display: grid;
+  gap: 4px;
+  margin: var(--jk-s4) 0;
+  padding: var(--jk-s3) 0;
+  border-top: 1px solid var(--jk-hair);
+  border-bottom: 1px solid var(--jk-hair);
+}
+.selected-summary strong {
+  color: var(--jk-ink);
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 1.3;
+}
+.selected-summary span {
+  color: var(--jk-t2);
+  font-size: var(--jk-fs-note);
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+}
+.details-form {
+  display: grid;
+  gap: var(--jk-s4);
+}
+.details-form label {
+  margin-top: 0;
+}
+.confirm-button,
+#confirm-reschedule,
+.meet-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  justify-self: start;
+  min-height: 44px;
+  margin-top: var(--jk-s2);
+  padding: 10px 18px;
+  border: 0;
+  border-radius: var(--jk-r-pill);
+  background: var(--jk-accent);
+  color: var(--on-accent);
+  font: 700 15px/1 var(--jk-font);
+  text-decoration: none;
+  cursor: pointer;
+}
+.confirm-button:disabled,
+#confirm-reschedule:disabled {
+  background: var(--jk-surface-2);
+  color: var(--jk-t2);
+  cursor: default;
+  opacity: 1;
+}
+.confirm-button:hover,
+#confirm-reschedule:hover:not(:disabled),
+.meet-link:hover {
+  filter: brightness(1.06);
+}
+
+.success-step {
+  max-width: 640px;
+  margin-top: var(--jk-group-gap);
+}
+.success-mark {
+  display: block;
+  width: 28px;
+  height: 28px;
+  margin-bottom: var(--jk-s3);
+  color: var(--jk-ok);
+}
+.success-mark svg {
+  width: 28px;
+  height: 28px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.success-step .jk-eb {
+  margin-bottom: var(--jk-s2);
+}
+.success-copy {
+  margin-top: var(--jk-s3);
+  max-width: 62ch;
+  color: var(--jk-t2);
+  font-size: var(--jk-fs-body);
+  line-height: 1.5;
+}
+#confirmed-title {
+  margin-top: var(--jk-s3);
+  font-size: 20px;
+  font-weight: 650;
+  letter-spacing: -0.02em;
+  overflow-wrap: anywhere;
+}
+#manage-booking {
+  color: var(--jk-accent-text);
+  font-weight: 650;
+  text-underline-offset: 3px;
+}
+.success-step p + p {
+  margin-top: var(--jk-s4);
+}
+
+.booking-footer {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-top: var(--jk-s10);
+  padding: var(--jk-s5) 0 calc(var(--jk-s8) + env(safe-area-inset-bottom));
+  border-top: 1px solid var(--jk-hair);
+  color: var(--jk-t3);
+  font-size: var(--jk-fs-sm);
+}
+.booking-footer a {
+  color: var(--jk-t2);
+  text-underline-offset: 3px;
+}
+
+/* Privacy is prose on the background. No glass panel. */
+.privacy-page .jk-group h2 {
+  margin-bottom: var(--jk-s3);
+}
+.privacy-page .jk-cb p {
+  max-width: 68ch;
+  color: var(--jk-ink);
+  font-size: var(--jk-fs-body);
+  line-height: 1.5;
+}
+.privacy-page .jk-cb p + p {
+  margin-top: var(--jk-s3);
+}
+.privacy-page a {
+  color: var(--jk-accent-text);
+  text-underline-offset: 3px;
+}
+.privacy-page .updated {
+  color: var(--jk-t2);
+  font-size: var(--jk-fs-note);
+}
+
+/* Guest management. Summary on the page; actions in the one glass panel. */
+#meeting-heading {
+  overflow-wrap: anywhere;
+}
+.manage-page .selected-summary {
+  margin-top: var(--jk-hero-gap);
+}
+.manage-panel:not(:has(:not(.hidden))) {
+  display: none;
+}
+.account-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+.account-confirm,
+#pending-change,
+#reschedule-panel {
+  display: grid;
+  gap: var(--jk-s3);
+  justify-items: start;
+}
+.account-confirm p,
+#pending-change p,
+#reschedule-panel .note,
+.reschedule-fields,
+.manage-slots {
+  justify-self: stretch;
+  width: 100%;
+}
+.account-confirm h3,
+#reschedule-panel h3,
+#pending-change p,
+.account-confirm p,
+.manage-page .note {
+  margin: 0;
+  color: var(--jk-t2);
+  font-size: var(--jk-fs-note);
+  font-weight: 500;
+  letter-spacing: 0;
+  line-height: 1.45;
+  text-transform: none;
+}
+.account-confirm h3,
+#reschedule-panel h3 {
+  color: var(--jk-ink);
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+.account-button {
+  min-height: 44px;
+  padding: 8px 14px;
+  border: 0;
+  border-radius: var(--jk-r-pill);
+  background: transparent;
+  box-shadow: inset 0 0 0 1.5px var(--jk-ink-2);
+  color: var(--jk-ink);
+  font: 650 14px/1 var(--jk-font);
+  cursor: pointer;
+}
+.account-button:hover {
+  background: var(--jk-surface-2);
+}
+.account-button.danger {
+  color: var(--jk-fail);
+  box-shadow: inset 0 0 0 1.5px var(--jk-fail);
+}
+.account-button.danger:hover {
+  background: transparent;
+}
+.reschedule-fields {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: var(--jk-s4);
+}
+.reschedule-fields label {
+  margin-top: 0;
+}
+.manage-slots {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0;
+  color: var(--jk-t2);
+  font-size: var(--jk-fs-note);
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+}
+.manage-slots button.selected {
+  background: var(--jk-accent);
+  color: var(--on-accent);
+  box-shadow: none;
+}
+.manage-page .jk-note {
+  margin-top: var(--jk-s4);
+}
+
+@container (min-width: 760px) {
+  .date-time-grid {
+    grid-template-columns: minmax(280px, 420px) minmax(200px, 280px);
+    column-gap: var(--jk-s12);
+    align-items: start;
+  }
+  .times-panel {
+    border-left: 1px solid var(--jk-hair);
+    padding-left: var(--jk-s6);
+  }
+}
+
+@media (max-width: 759px) {
+  .times-list {
+    max-height: none;
+  }
+  .calendar {
+    max-width: none;
+  }
+}
+
+@media (max-width: 680px) {
+  .reschedule-fields {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .booking-page .jk-top {
+    gap: 8px;
+    padding-left: 12px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .loading-times i {
+    animation: none;
+  }
+  .confirm-button:hover,
+  #confirm-reschedule:hover:not(:disabled),
+  .meet-link:hover {
+    filter: none;
+  }
+}
+html.jk-rm .loading-times i {
+  animation: none;
+}
+html.jk-rm .confirm-button:hover,
+html.jk-rm #confirm-reschedule:hover,
+html.jk-rm .meet-link:hover {
+  filter: none;
+}
+
+@media (forced-colors: active) {
+  .calendar-grid button.selected,
+  .duration-option.selected,
+  .time-choice.selected .next-button,
+  .manage-slots button.selected,
+  .confirm-button,
+  .meet-link {
+    outline: 2px solid CanvasText;
+  }
+  .calendar-grid button.today:not(.selected) {
+    outline: 1px solid CanvasText;
+  }
+}
