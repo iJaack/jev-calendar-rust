@@ -4,7 +4,7 @@ Presentation package for book.jaack.me. No data, endpoints, or secrets.
 
 - Version: `2026-10-22` (source file dates; the package README has no semver)
 - Package archive SHA-256: `392f8949b5a5f7c7c5e459fcb431ed536fe6aaa90513e7e179cd49e2c6f5094a`
-- Vendored tree SHA-256 (SHA256SUMS bytes, screenshots excluded): `6c700e5ff76aa6a641a425ac075ce22e76f23fcadcb6b38d187615c29f173375`
+- Vendored tree SHA-256 (SHA256SUMS bytes, screenshots excluded): `9c5074c77de2131a04c7154cba704033a7cd1c75882684e8993dfa62c788848f`
 
 Served copies, byte-identical to this tree:
 

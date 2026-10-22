@@ -162,6 +162,9 @@ html[data-theme="dark"] .jk-glass::after{background:radial-gradient(420px circle
 .jk-top .jk-tag{font-size:12px;color:var(--jk-ink-2);white-space:nowrap}
 .jk-top .jk-links{display:flex;gap:var(--jk-s2)}
 .jk-top a.jk-sw{font-size:13px;color:var(--jk-ink);text-decoration:none;padding:7px 12px;border-radius:var(--jk-r-pill);background:var(--jk-tint-hi);white-space:nowrap}
+.jk-top>*{min-width:0;flex-shrink:1}
+.jk-top .jk-mark,.jk-top .jk-links,.jk-top .jk-tag{overflow:hidden}
+.jk-top [data-jk-theme-switch]{flex:none;min-width:max-content;min-height:44px}
 @media (max-width:640px){.jk-top .jk-tag{display:none}.jk-top .jk-links .jk-sw:not(.keep){display:none}}
 /* theme switch — Auto / Chiaro / Scuro (mounted by theme.js: JaackTheme.mount(hostElement)) */
 .jk-thsw{display:inline-flex;gap:2px;padding:2px;border-radius:var(--jk-r-pill);background:var(--jk-tint-hi);flex:none}
@@ -169,7 +172,7 @@ html[data-theme="dark"] .jk-glass::after{background:radial-gradient(420px circle
 .jk-thsw button[aria-pressed="true"]{background:var(--jk-bg);color:var(--jk-ink);box-shadow:0 1px 3px rgba(0,0,0,.12)}
 .jk-thsw button:focus-visible{outline:2px solid var(--jk-accent);outline-offset:1px}
 .jk-thsw .i{display:none}
-@media (max-width:760px){.jk-thsw .i{display:inline}.jk-thsw .l{display:none}.jk-thsw button{padding:6px 8px;font-size:13px}}
+@media (max-width:760px){.jk-thsw{gap:1px;padding:1px}.jk-thsw .i{display:inline}.jk-thsw .l{display:none}.jk-thsw button{min-width:36px;min-height:36px;padding:0 6px;font-size:13px}}
 /* editorial chapters — each page section is a chapter that answers one question:
    numeral + eyebrow, the question as title, a one-line lede, then hero → figure → groups.
    64 px between chapters on desktop (40 on mobile) with one hairline in the middle. */
