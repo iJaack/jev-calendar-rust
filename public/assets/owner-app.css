@@ -1,0 +1,210 @@
+/* Shared Jaack design, matched to jaack.me: warm neutrals, yellow, quiet rules. */
+:root { color-scheme:dark; --ink:#f0ede8; --muted:#aaa69f; --line:#292824; --paper:#141414; --accent:#e8c547; --accent-hover:#f2d66b; --soft:#1c1b17; --error:#f0a6a0; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; color:var(--ink); background:#0c0c0c; }
+* { box-sizing:border-box; }
+body { margin:0; min-height:100dvh; background:#0c0c0c; font-size:15px; line-height:1.55; }
+a { color:var(--accent); text-underline-offset:4px; }
+button,input,select,textarea { font:inherit; }
+button,a,input,select,textarea { -webkit-tap-highlight-color:transparent; }
+button { min-height:44px; border:1px solid transparent; border-radius:4px; padding:10px 18px; color:#0c0c0c; background:var(--accent); font-weight:600; cursor:pointer; transition:background .15s,color .15s,border-color .15s; }
+button:hover { background:var(--accent-hover); }
+button:active { transform:translateY(1px); }
+button:disabled { cursor:default; opacity:.45; }
+:focus-visible { outline:2px solid var(--accent); outline-offset:4px; }
+input,select,textarea { min-height:46px; width:100%; min-width:0; padding:10px 12px; border:1px solid #4a4740; border-radius:4px; background:#101010; color:var(--ink); }
+input::placeholder,textarea::placeholder { color:#96928a; }
+input:focus,select:focus,textarea:focus { border-color:var(--accent); }
+label { display:grid; gap:8px; color:var(--ink); font-size:13px; font-weight:500; }
+h1,h2,h3 { font-weight:500; line-height:1.12; letter-spacing:-.035em; text-wrap:balance; }
+h1 { font-size:clamp(38px,5vw,60px); margin:14px 0 22px; }
+h2 { margin:0; font-size:25px; }
+p { text-wrap:pretty; }
+::selection { background:var(--accent); color:#0c0c0c; }
+.hidden { display:none!important; }
+.sr-only { position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0,0,0,0); white-space:nowrap; border:0; }
+.skip-link { position:absolute; top:8px; left:16px; z-index:20; padding:8px 12px; background:var(--accent); color:#0c0c0c; transform:translateY(-160%); }
+.skip-link:focus { transform:none; }
+.booking-header,.shell>nav { width:min(1120px,calc(100% - 48px)); min-height:88px; display:flex; align-items:center; justify-content:space-between; gap:24px; margin:0 auto; border-bottom:1px solid var(--line); }
+.booking-brand,.brand { color:var(--ink); font-size:25px; font-weight:700; letter-spacing:-1px; text-decoration:none; }
+.booking-brand span,.brand span { color:var(--accent); }
+.header-label,.nav-link { color:var(--muted); font-size:13px; text-decoration:none; }
+.nav-link:hover { color:var(--accent); }
+.scheduler { width:min(1120px,calc(100% - 48px)); min-height:650px; margin:48px auto 0; display:grid; grid-template-columns:330px minmax(0,1fr); }
+.event-panel { padding:8px 40px 40px 0; border-right:1px solid var(--line); }
+.host-avatar { width:52px; height:52px; display:block; margin-bottom:24px; object-fit:cover; object-position:center 30%; border-radius:50%; }
+.host-name { color:var(--muted); font-size:13px; margin:0 0 16px; }
+.booking-page h1 { font-size:44px; margin:0 0 24px; }
+.event-copy { color:var(--muted); font-size:14px; line-height:1.7; margin:0 0 30px; }
+.event-meta { display:grid; gap:14px; margin:0 0 30px; font-size:13px; }
+.event-meta div { display:flex; align-items:center; gap:12px; }
+.event-meta dt { display:flex; color:var(--muted); }
+.event-meta dd { margin:0; }
+.event-meta svg,.timezone-row svg { width:18px; height:18px; fill:none; stroke:currentColor; stroke-width:1.5; stroke-linecap:round; stroke-linejoin:round; flex-shrink:0; }
+.field-label { display:block; color:var(--muted); font-size:12px; margin-bottom:10px; }
+.duration-options { display:flex; gap:8px; }
+.duration-option { min-width:62px; background:transparent; color:var(--muted); border-color:#4a4740; font-size:13px; }
+.duration-option:hover { background:var(--soft); color:var(--ink); }
+.duration-option.selected { background:var(--accent); border-color:var(--accent); color:#0c0c0c; }
+.picker-panel { min-width:0; padding:8px 0 40px 40px; }
+.picker-heading { display:flex; align-items:center; justify-content:space-between; gap:18px; margin-bottom:32px; }
+.step-kicker,.eyebrow { color:var(--accent); font-size:12px; margin:0 0 8px; letter-spacing:.02em; }
+.live-calendar { display:flex; align-items:center; gap:8px; color:var(--muted); font-size:11px; white-space:nowrap; }
+.live-calendar i { width:6px; height:6px; background:var(--accent); border-radius:50%; }
+.date-time-grid { display:grid; grid-template-columns:minmax(280px,1fr) 190px; gap:28px; }
+.calendar-nav { min-height:44px; display:grid; grid-template-columns:40px 1fr 40px; align-items:center; margin-bottom:16px; }
+.calendar-nav strong { text-align:center; font-size:14px; font-weight:500; }
+.calendar-nav button,.back-button { display:flex; align-items:center; justify-content:center; padding:8px; color:var(--muted); background:transparent; }
+.calendar-nav button:hover,.back-button:hover { color:var(--ink); background:var(--soft); }
+.calendar-nav button:disabled { visibility:hidden; }
+.calendar-nav svg,.back-button svg { width:20px; height:20px; fill:none; stroke:currentColor; stroke-width:1.5; stroke-linecap:round; stroke-linejoin:round; }
+.weekdays,.calendar-grid { display:grid; grid-template-columns:repeat(7,minmax(0,1fr)); gap:4px; }
+.weekdays { margin-bottom:10px; color:var(--muted); text-align:center; font-size:10px; }
+.calendar-grid { min-height:260px; align-content:start; }
+.calendar-grid button { aspect-ratio:1; min-height:0; padding:0; background:transparent; color:var(--ink); border-radius:4px; font-size:13px; font-weight:500; font-variant-numeric:tabular-nums; }
+.calendar-grid button:not(:disabled):hover { background:var(--soft); color:var(--accent); }
+.calendar-grid button:disabled { color:#625f58; opacity:1; }
+.calendar-grid button.today { border-color:#716337; color:var(--accent); }
+.calendar-grid button.today:disabled { border-color:transparent; color:#625f58; }
+.calendar-grid button.recommended:not(.selected) { color:var(--accent); border-color:#66582d; }
+.calendar-grid button.selected { color:#0c0c0c; background:var(--accent); border-color:var(--accent); }
+.calendar-grid button.selected:not(:disabled):hover { color:#0c0c0c; background:var(--accent-hover); }
+.timezone-row { display:flex; align-items:center; gap:10px; margin-top:24px; color:var(--muted); }
+.timezone-row select { min-height:40px; font-size:12px; }
+.times-panel { min-width:0; }
+.times-date { min-height:44px; display:flex; align-items:center; margin:0 0 16px; color:var(--muted); font-size:12px; }
+.times-hint { display:block; margin:-12px 0 12px; color:var(--muted); font-size:11px; }
+.times-list { max-height:348px; display:grid; gap:8px; overflow:auto; padding:3px 5px 3px 3px; scrollbar-width:thin; scrollbar-color:#514d42 transparent; }
+.times-empty { color:var(--muted); font-size:13px; line-height:1.65; }
+.time-choice { display:grid; grid-template-columns:1fr 0fr; gap:0; }
+.time-choice.selected { grid-template-columns:1fr 1fr; gap:8px; }
+.time-button,.next-button { width:100%; min-width:0; min-height:46px; padding:8px; font-size:13px; font-weight:500; font-variant-numeric:tabular-nums; }
+.time-button { background:var(--paper); color:var(--accent); border-color:#514831; }
+.time-button:hover { background:var(--soft); border-color:var(--accent); }
+.time-choice.selected .time-button { background:#302b1b; color:var(--ink); border-color:#716337; }
+.next-button { overflow:hidden; padding:0; opacity:0; pointer-events:none; }
+.time-choice.selected .next-button { padding:8px; opacity:1; pointer-events:auto; }
+.loading-times { display:grid; gap:8px; }
+.loading-times i { height:46px; display:block; background:#22211d; border-radius:4px; animation:loading-pulse 1s ease-in-out infinite alternate; }
+@keyframes loading-pulse { to { opacity:.4; } }
+.inline-status,.status { margin:18px 0 0; padding:12px 14px; color:var(--muted); background:var(--soft); border:1px solid var(--line); border-radius:4px; font-size:13px; line-height:1.5; }
+.inline-status.error,.status.error { color:var(--error); background:#261817; border-color:#58322e; }
+.retry-dates { margin-top:10px; min-height:38px; padding:7px 12px; color:var(--accent); background:transparent; border-color:#514831; font-size:13px; }
+.retry-dates:hover { background:var(--soft); }
+.details-step { max-width:490px; margin:0 auto; }
+.back-button { justify-content:flex-start; gap:6px; margin:0 0 24px -8px; font-size:13px; }
+.selected-summary { display:grid; gap:6px; margin:24px 0; padding:16px 0; border-top:1px solid var(--line); border-bottom:1px solid var(--line); }
+.selected-summary strong { font-size:14px; font-weight:500; }
+.selected-summary span { color:var(--muted); font-size:12px; }
+.details-form { display:grid; gap:20px; }
+.details-form input { font-size:15px; }
+.confirm-button { justify-self:start; margin-top:4px; }
+.success-step { max-width:490px; margin:32px auto; }
+.success-icon { width:52px; height:52px; display:grid; place-items:center; margin-bottom:24px; color:var(--accent); background:var(--soft); border:1px solid #514831; border-radius:50%; }
+.success-icon svg { width:26px; height:26px; fill:none; stroke:currentColor; stroke-width:1.8; stroke-linecap:round; stroke-linejoin:round; }
+.success-copy { color:var(--muted); font-size:14px; line-height:1.7; }
+#confirmed-title { font-size:20px; overflow-wrap:anywhere; }
+.meet-link { display:inline-flex; align-items:center; min-height:44px; padding:10px 18px; color:#0c0c0c; background:var(--accent); border-radius:4px; text-decoration:none; font-size:14px; font-weight:600; }
+.meet-link:hover { background:var(--accent-hover); }
+.booking-footer,.footer { display:flex; justify-content:space-between; gap:16px; margin:32px auto 0; padding:24px 0 32px; border-top:1px solid var(--line); color:var(--muted); font-size:12px; }
+.booking-footer { width:min(1120px,calc(100% - 48px)); }
+.booking-footer a { color:var(--muted); }
+.shell { width:min(1120px,calc(100% - 48px)); margin:auto; padding-bottom:20px; }
+.shell>nav { width:100%; }
+.owner-hero { max-width:740px; margin:48px 0 36px; }
+.owner-hero h1 { max-width:640px; }
+.lede { color:var(--muted); line-height:1.7; max-width:590px; }
+.settings { max-width:800px; padding:32px; background:var(--paper); border:1px solid var(--line); border-radius:6px; }
+.note { color:var(--muted); font-size:13px; line-height:1.65; }
+.settings form { display:grid; gap:24px; grid-template-columns:repeat(2,minmax(0,1fr)); }
+.settings .wide { grid-column:1/-1; }
+.settings .save { justify-self:start; }
+.timezone-sync { display:grid; gap:5px; margin:26px 0; padding:18px 0; border-top:1px solid var(--line); border-bottom:1px solid var(--line); }
+.timezone-sync strong { font-size:12px; font-weight:500; color:var(--muted); }
+.timezone-sync span { font-size:15px; }
+.timezone-sync small { color:var(--muted); font-size:12px; }
+.address-field { display:grid; gap:8px; font-size:13px; }
+.address-field small { color:var(--muted); font-size:12px; }
+.address-field small.verified { color:var(--accent); }
+.address-field small.error { color:var(--error); }
+.address-field input.invalid { border-color:var(--error); }
+.address-field .address-attribution { font-size:11px; }
+.address-combobox { position:relative; }
+.address-results { position:absolute; z-index:10; top:calc(100% + 6px); left:0; right:0; max-height:280px; overflow:auto; padding:5px; background:#1c1b17; border:1px solid #514d42; border-radius:4px; }
+.address-option { width:100%; display:grid; gap:3px; padding:12px; color:var(--ink); background:transparent; text-align:left; }
+.address-option:hover,.address-option.active { background:#302b1b; }
+.address-option strong { font-size:13px; font-weight:500; }
+.address-option span { color:var(--muted); font-size:12px; font-weight:400; }
+.connection { margin-top:28px; padding-top:24px; border-top:1px solid var(--line); display:flex; justify-content:space-between; align-items:center; gap:20px; font-size:13px; }
+.connection strong { font-weight:500; }
+.connection p { color:var(--muted); margin:6px 0 0; }
+.connection-actions { display:flex; align-items:center; gap:12px; }
+.connection-state { color:var(--muted); font-size:11px; white-space:nowrap; }
+.connection-state.live { color:var(--accent); }
+.connection a { white-space:nowrap; padding:8px 0; }
+@media (max-width:980px) {
+ .scheduler { grid-template-columns:280px minmax(0,1fr); }
+ .event-panel { padding-right:28px; }
+ .picker-panel { padding-left:28px; }
+ .date-time-grid { grid-template-columns:1fr; gap:24px; }
+ .times-panel { border-top:1px solid var(--line); padding-top:16px; }
+ .times-list { grid-template-columns:repeat(2,minmax(0,1fr)); max-height:300px; }
+}
+@media (max-width:680px) {
+ .booking-header,.shell>nav { min-height:76px; }
+ .scheduler { margin-top:28px; grid-template-columns:1fr; min-height:0; }
+ .event-panel { padding:0 0 28px; border-right:0; border-bottom:1px solid var(--line); }
+ .host-avatar { margin-bottom:18px; }
+ .booking-page h1 { font-size:38px; }
+ .event-copy { max-width:460px; margin-bottom:22px; }
+ .event-meta { gap:10px; margin-bottom:22px; }
+ .picker-panel { padding:28px 0; }
+ .picker-heading { gap:10px; }
+ .live-calendar { font-size:10px; }
+ .calendar-grid { min-height:0; }
+ .calendar-grid button { min-height:36px; }
+ .times-list { grid-template-columns:1fr; max-height:none; }
+ .details-form input { font-size:16px; }
+ .success-step { margin:8px auto; }
+ .owner-hero { margin-top:32px; }
+ .owner-hero h1 { font-size:40px; }
+ .settings { padding:22px; }
+ .settings form { grid-template-columns:1fr; }
+ .settings .wide { grid-column:auto; }
+ .connection { align-items:flex-start; flex-direction:column; }
+ .booking-footer,.footer { font-size:11px; }
+}
+@media (prefers-reduced-motion:reduce) { *,*::before,*::after { animation:none!important; transition:none!important; } }
+
+/* Google connections share the dashboard's Jaack palette and spacing. */
+.accounts-panel { margin-top:24px; }
+.workload-panel { margin-top:24px; }
+.project-rule { padding:14px 0; border-top:1px solid var(--line); }
+.project-rule summary { cursor:pointer; font-size:16px; font-weight:650; }
+.project-fields { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:16px; padding-top:18px; }
+.project-fields button { justify-self:start; }
+.project-rule select[multiple] { min-height:88px; }
+@media (max-width:640px) { .project-fields { grid-template-columns:1fr; } }
+.accounts-heading { display:flex; align-items:center; justify-content:space-between; gap:20px; flex-wrap:wrap; }
+.accounts-heading button { font-size:13px; }
+.google-account { display:grid; grid-template-columns:minmax(0,1fr); gap:16px; padding:22px 0; border-top:1px solid var(--line); }
+.google-account:last-child { padding-bottom:0; }
+.account-details { display:grid; gap:5px; overflow-wrap:anywhere; }
+.account-details strong { font-size:14px; font-weight:500; }
+.account-state { color:var(--accent); font-size:12px; }
+.account-state.error { color:var(--error); }
+.account-disconnect-hint { color:var(--muted); font-size:12px; }
+.account-actions { display:flex; flex-wrap:wrap; gap:8px; }
+.account-button { background:transparent; border-color:#4a4740; color:var(--ink); font-size:12px; padding:8px 12px; }
+.account-button:hover { background:var(--soft); border-color:var(--accent); }
+.account-button.danger { color:var(--error); }
+.account-confirm { background:var(--soft); padding:16px; border:1px solid var(--line); border-radius:4px; }
+.account-confirm p { margin:0 0 14px; color:var(--muted); font-size:13px; }
+.account-confirm button { margin:0 8px 8px 0; }
+
+/* Guest meeting management. */
+#manage-actions { margin-top:24px; }
+#cancel-confirmation,#reschedule-panel { margin-top:24px; }
+#meeting-heading { overflow-wrap:anywhere; }
+.reschedule-fields { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
+.manage-slots { display:flex; flex-wrap:wrap; gap:8px; margin-top:20px; color:var(--muted); font-size:13px; }
+.manage-slots button.selected { background:var(--accent); color:#0c0c0c; border-color:var(--accent); }
+@media(max-width:680px) { .reschedule-fields { grid-template-columns:1fr; } }

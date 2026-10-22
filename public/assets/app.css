@@ -1,0 +1,934 @@
+/* Booking adaptation of Forma (jaack design system, 2026-10-22).
+   Provenance: vendor/jaack-design-system/VENDOR.md.
+   Shared foundations stay in the vendored bundles: token names, type scale,
+   4 px spacing, glass, top bar, theme.js (light 07–19, Auto/Chiaro/Scuro).
+   This file retunes the palette, gradient, type emphasis and the calendar
+   for book.jaack.me. The site’s own yellow (#e8c547 on near-black) is the
+   accent, not Forma’s antique gold. Vendored files are not edited. */
+
+/* Theme values live on <html>, which paints the page background. */
+html[data-theme="light"]:has(body.booking-page) {
+  --jk-bg: #f4f1e8;
+  --jk-surface: #faf7f0;
+  --jk-surface-2: #e8e2d4;
+  --jk-ink: #16140f;
+  --jk-ink-2: #5a5348;
+  --jk-t2: rgba(22, 20, 15, .70);
+  --jk-t3: rgba(22, 20, 15, .64);
+  --jk-hair: rgba(22, 20, 15, .12);
+  --jk-accent: #e8c547;
+  --jk-accent-text: #6e5300;
+  --jk-on-accent: #14120c;
+  --jk-accent-wash: rgba(232, 197, 71, .28);
+  --jk-ok: #256b2d;
+  --jk-fail: #a33a22;
+  --jk-tint: rgba(250, 247, 240, .72);
+  --jk-tint-hi: rgba(250, 247, 240, .86);
+  --jk-tint-edge: rgba(255, 252, 245, .4);
+  --jk-bg-1: rgba(232, 197, 71, .30);
+  --jk-bg-1b: rgba(232, 197, 71, .10);
+  --jk-bg-2: rgba(176, 142, 78, .24);
+  --jk-bg-2b: rgba(176, 142, 78, .08);
+  --jk-bg-3: rgba(120, 86, 36, .16);
+  --jk-bg-3b: rgba(120, 86, 36, .06);
+}
+html[data-theme="dark"]:has(body.booking-page) {
+  --jk-bg: #0c0c0c;
+  --jk-surface: #141414;
+  --jk-surface-2: #1c1b17;
+  --jk-ink: #f0ede8;
+  --jk-ink-2: #aaa69f;
+  --jk-t2: rgba(240, 237, 232, .70);
+  --jk-t3: rgba(240, 237, 232, .56);
+  --jk-hair: rgba(240, 237, 232, .14);
+  --jk-accent: #e8c547;
+  --jk-accent-text: #e8c547;
+  --jk-on-accent: #14120c;
+  --jk-accent-wash: rgba(232, 197, 71, .16);
+  --jk-ok: #c6b15a;
+  --jk-fail: #f0a6a0;
+  --jk-tint: rgba(16, 15, 12, .66);
+  --jk-tint-hi: rgba(28, 26, 20, .78);
+  --jk-tint-edge: rgba(16, 15, 12, .34);
+  --jk-bg-1: rgba(232, 197, 71, .16);
+  --jk-bg-1b: rgba(232, 197, 71, .05);
+  --jk-bg-2: rgba(96, 68, 22, .42);
+  --jk-bg-2b: rgba(96, 68, 22, .14);
+  --jk-bg-3: rgba(168, 124, 48, .14);
+  --jk-bg-3b: rgba(168, 124, 48, .05);
+}
+
+.booking-page {
+  --jk-topbar-h: 76px;
+  --jk-chapter-gap: 40px;
+  --jk-chapter-gap-m: 28px;
+  --jk-group-gap: 20px;
+  --jk-hero-gap: 14px;
+  --on-accent: #14120c;
+  --book-accent-hover: #f2d66b;
+}
+
+.booking-page .jk-page {
+  max-width: 1120px;
+}
+
+/* A scheduler title, not a dashboard question. Same scale, lighter weight. */
+.booking-page .jk-ct {
+  display: block;
+}
+.booking-page .jk-eb {
+  margin: 0 0 6px;
+  color: var(--jk-accent-text);
+  font-weight: 650;
+  letter-spacing: 0.02em;
+  text-transform: none;
+}
+.booking-page .jk-q {
+  font-weight: 520;
+  letter-spacing: -0.035em;
+  line-height: 1.12;
+}
+.booking-page .jk-lede {
+  margin-top: var(--jk-s3);
+  font-size: var(--jk-fs-body);
+  line-height: 1.5;
+}
+
+/* One reading column. A booking page is a sequence, not a dashboard grid. */
+.booking-page .jk-chs {
+  grid-template-columns: minmax(0, 1fr);
+}
+.booking-page .jk-ch + .jk-ch {
+  border-left: 0;
+  margin-left: 0;
+  padding-left: 0;
+}
+
+.booking-page p {
+  margin: 0;
+}
+
+.hidden {
+  display: none !important;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.skip-link {
+  position: fixed;
+  z-index: 80;
+  left: 12px;
+  top: 12px;
+  padding: 10px 14px;
+  border-radius: var(--jk-r-pill);
+  background: var(--jk-accent);
+  color: var(--on-accent);
+  font-weight: 700;
+  text-decoration: none;
+  transform: translateY(-160%);
+}
+.skip-link:focus {
+  transform: none;
+}
+
+.booking-page :focus-visible {
+  outline: 2px solid var(--jk-accent-text);
+  outline-offset: 3px;
+}
+.booking-page .jk-thsw button:focus-visible,
+.booking-page .jk-top a:focus-visible {
+  outline: 2px solid var(--jk-accent-text);
+  outline-offset: 2px;
+}
+
+/* Theme switch sits in the top bar. Give it a ~40 px target. */
+.booking-page .jk-thsw button {
+  min-height: 40px;
+  min-width: 40px;
+  padding: 8px 12px;
+}
+
+.booking-page ::selection {
+  background: var(--jk-accent);
+  color: var(--on-accent);
+}
+
+/* Host line sits on the page, under the chapter question. */
+.book-host {
+  display: flex;
+  align-items: center;
+  gap: var(--jk-s3);
+  margin-top: var(--jk-hero-gap);
+}
+.host-avatar {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  object-fit: cover;
+  object-position: center 30%;
+  flex: none;
+}
+.book-host p {
+  color: var(--jk-t2);
+  font-size: var(--jk-fs-note);
+  line-height: 1.4;
+}
+
+.book-tools {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--jk-s4);
+  flex-wrap: wrap;
+  margin-top: var(--jk-group-gap);
+}
+.field-label {
+  display: block;
+  margin-bottom: var(--jk-s2);
+  color: var(--jk-t2);
+  font-size: var(--jk-fs-xs);
+  font-weight: 700;
+  letter-spacing: var(--jk-track-label);
+  text-transform: uppercase;
+}
+
+/* Segmented length control. A flat pill, not a second glass panel. */
+.duration-options {
+  display: inline-flex;
+  gap: 2px;
+  padding: 3px;
+  border-radius: var(--jk-r-pill);
+  background: var(--jk-surface-2);
+}
+.duration-option {
+  min-width: 64px;
+  min-height: 40px;
+  padding: 8px 14px;
+  border: 0;
+  border-radius: var(--jk-r-pill);
+  background: transparent;
+  color: var(--jk-ink-2);
+  font: 600 14px/1 var(--jk-font);
+  cursor: pointer;
+}
+.duration-option:hover {
+  color: var(--jk-ink);
+}
+.duration-option.selected {
+  background: var(--jk-accent);
+  color: var(--on-accent);
+}
+.duration-option.selected:hover {
+  color: var(--on-accent);
+}
+
+.live-calendar {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 40px;
+  color: var(--jk-t2);
+  font-size: var(--jk-fs-xs);
+  font-weight: 700;
+  letter-spacing: var(--jk-track-label);
+  text-transform: uppercase;
+}
+.live-calendar i {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--jk-accent-text);
+  flex: none;
+}
+
+.date-time-grid {
+  display: grid;
+  gap: var(--jk-s5);
+  margin-top: var(--jk-s5);
+  max-width: 760px;
+}
+.calendar {
+  min-width: 0;
+  max-width: 420px;
+}
+.calendar-nav {
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr) 40px;
+  align-items: center;
+  min-height: 40px;
+  margin-bottom: var(--jk-s3);
+}
+.calendar-nav strong {
+  text-align: center;
+  font-size: var(--jk-fs-body);
+  font-weight: 650;
+  letter-spacing: -0.02em;
+}
+.calendar-nav button,
+.back-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-width: 40px;
+  min-height: 40px;
+  padding: 8px;
+  border: 0;
+  border-radius: var(--jk-r-pill);
+  background: transparent;
+  color: var(--jk-ink);
+  font: 600 14px/1 var(--jk-font);
+  cursor: pointer;
+}
+.calendar-nav button:hover,
+.back-button:hover {
+  background: var(--jk-surface-2);
+}
+.calendar-nav button:disabled {
+  visibility: hidden;
+}
+.calendar-nav svg,
+.back-button svg {
+  width: 20px;
+  height: 20px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.back-button {
+  justify-content: flex-start;
+  margin: 0 0 var(--jk-s4);
+  padding-left: 2px;
+  padding-right: 12px;
+}
+
+.weekdays,
+.calendar-grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 2px;
+}
+.weekdays {
+  margin-bottom: var(--jk-s2);
+  color: var(--jk-t2);
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: 0.06em;
+  text-align: center;
+  text-transform: uppercase;
+}
+.calendar-grid {
+  align-content: start;
+}
+.calendar-grid button {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 42px;
+  min-height: 40px;
+  padding: 0;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--jk-ink);
+  font: 560 15px/1 var(--jk-font);
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+}
+.calendar-grid button:not(:disabled):hover {
+  background: var(--jk-surface-2);
+}
+.calendar-grid button:disabled {
+  color: var(--jk-t3);
+  cursor: default;
+  opacity: 1;
+}
+.calendar-grid button.today:not(.selected) {
+  box-shadow: inset 0 0 0 1.5px var(--jk-ink);
+}
+.calendar-grid button.recommended:not(.selected) {
+  color: var(--jk-accent-text);
+}
+.calendar-grid button.recommended:not(.selected)::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  bottom: 5px;
+  width: 4px;
+  height: 4px;
+  margin-left: -2px;
+  border-radius: 1px;
+  background: var(--jk-accent-text);
+}
+.calendar-grid button.selected {
+  border-radius: 12px;
+  background: var(--jk-accent);
+  color: var(--on-accent);
+  font-weight: 700;
+  box-shadow: none;
+}
+.calendar-grid button.selected:not(:disabled):hover {
+  background: var(--book-accent-hover);
+  color: var(--on-accent);
+}
+
+.book-key {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: var(--jk-s3);
+  color: var(--jk-t2);
+  font-size: var(--jk-fs-sm);
+}
+.book-key .is-today,
+.book-key .is-suggested {
+  display: inline-block;
+  flex: none;
+}
+.book-key .is-today {
+  width: 14px;
+  height: 14px;
+  border-radius: 4px;
+  box-shadow: inset 0 0 0 1.5px var(--jk-ink);
+}
+.book-key .is-suggested {
+  width: 4px;
+  height: 4px;
+  border-radius: 1px;
+  background: var(--jk-accent-text);
+}
+.book-key .gap {
+  width: 8px;
+}
+
+.timezone-row,
+.details-form label,
+.reschedule-fields label {
+  display: grid;
+  gap: 6px;
+  margin-top: var(--jk-s4);
+  color: var(--jk-t2);
+  font-size: var(--jk-fs-xs);
+  font-weight: 700;
+  letter-spacing: var(--jk-track-label);
+  text-transform: uppercase;
+}
+.booking-page input,
+.booking-page select {
+  width: 100%;
+  min-width: 0;
+  min-height: 44px;
+  padding: 8px 2px;
+  border: 0;
+  border-bottom: 1.5px solid var(--jk-ink-2);
+  border-radius: 0;
+  background: transparent;
+  color: var(--jk-ink);
+  font: 500 16px/1.3 var(--jk-font);
+  letter-spacing: 0;
+  text-transform: none;
+}
+.booking-page input::placeholder {
+  color: var(--jk-t2);
+  opacity: 1;
+}
+.booking-page input:focus,
+.booking-page select:focus {
+  border-bottom-color: var(--jk-accent-text);
+}
+.booking-page input:-webkit-autofill {
+  -webkit-text-fill-color: var(--jk-ink);
+  caret-color: var(--jk-ink);
+  box-shadow: inset 0 0 0 1000px var(--jk-bg);
+}
+
+.times-panel {
+  min-width: 0;
+}
+.times-date {
+  display: flex;
+  align-items: center;
+  min-height: 40px;
+  margin: 0;
+  color: var(--jk-ink);
+  font-size: var(--jk-fs-body);
+  font-weight: 650;
+  letter-spacing: -0.02em;
+}
+.times-hint {
+  display: block;
+  margin: 0 0 var(--jk-s2);
+  color: var(--jk-t3);
+  font-size: var(--jk-fs-sm);
+}
+.times-list {
+  max-height: 360px;
+  overflow: auto;
+  padding: 2px 4px 2px 0;
+  border-bottom: 1px solid var(--jk-hair);
+  scrollbar-width: thin;
+  scrollbar-color: var(--jk-ink-2) transparent;
+}
+.times-empty {
+  margin: 0;
+  padding: var(--jk-s3) 0;
+  color: var(--jk-t2);
+  font-size: var(--jk-fs-note);
+  line-height: 1.45;
+}
+.time-choice {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  border-top: 1px solid var(--jk-hair);
+}
+.time-button,
+.next-button {
+  border: 0;
+  background: transparent;
+  font: 600 15px/1 var(--jk-font);
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+}
+.time-button {
+  min-height: 44px;
+  padding: 8px 4px;
+  color: var(--jk-ink);
+  text-align: left;
+}
+.time-button:hover {
+  color: var(--jk-accent-text);
+}
+.next-button {
+  width: 0;
+  min-width: 0;
+  padding: 0;
+  overflow: hidden;
+  opacity: 0;
+  pointer-events: none;
+}
+.time-choice.selected {
+  background: var(--jk-accent-wash);
+  border-radius: 10px;
+}
+.time-choice.selected .time-button {
+  color: var(--jk-ink);
+  font-weight: 700;
+}
+.time-choice.selected .next-button {
+  width: auto;
+  min-width: 76px;
+  min-height: 40px;
+  margin: 4px 4px 4px 0;
+  padding: 0 14px;
+  border-radius: var(--jk-r-pill);
+  background: var(--jk-accent);
+  color: var(--on-accent);
+  opacity: 1;
+  pointer-events: auto;
+}
+.time-choice.selected .next-button:hover {
+  background: var(--book-accent-hover);
+}
+
+.loading-times {
+  display: grid;
+  gap: 8px;
+  padding: 8px 0;
+}
+.loading-times i {
+  display: block;
+  height: 40px;
+  border-radius: var(--jk-r-xs);
+  background: var(--jk-hair);
+  animation: book-pulse 1s ease-in-out infinite alternate;
+}
+@keyframes book-pulse {
+  to { opacity: 0.45; }
+}
+
+.inline-status,
+.status {
+  margin: var(--jk-s3) 0 0;
+  color: var(--jk-t2);
+  font-size: var(--jk-fs-note);
+  font-weight: 600;
+  line-height: 1.45;
+}
+.inline-status.error,
+.status.error {
+  color: var(--jk-fail);
+  font-weight: 700;
+}
+.retry-dates {
+  margin-top: var(--jk-s3);
+  min-height: 40px;
+  padding: 8px 14px;
+  border: 0;
+  border-radius: var(--jk-r-pill);
+  background: transparent;
+  box-shadow: inset 0 0 0 1.5px var(--jk-ink-2);
+  color: var(--jk-ink);
+  font: 650 14px/1 var(--jk-font);
+  cursor: pointer;
+}
+.retry-dates:hover {
+  background: var(--jk-surface-2);
+}
+
+/* The booking form is the one glass panel on this screen. */
+.book-form {
+  max-width: 520px;
+}
+.book-form h2,
+.success-step h2,
+.manage-page .jk-cb h2,
+.privacy-page .jk-cb h2 {
+  margin: 0;
+  font-size: clamp(22px, 2vw, 28px);
+  font-weight: 560;
+  letter-spacing: -0.035em;
+  line-height: 1.15;
+}
+.book-form .jk-lab {
+  margin-bottom: var(--jk-s2);
+}
+.selected-summary {
+  display: grid;
+  gap: 4px;
+  margin: var(--jk-s4) 0;
+  padding: var(--jk-s3) 0;
+  border-top: 1px solid var(--jk-hair);
+  border-bottom: 1px solid var(--jk-hair);
+}
+.selected-summary strong {
+  color: var(--jk-ink);
+  font-size: var(--jk-fs-title);
+  font-weight: 640;
+  letter-spacing: -0.035em;
+  line-height: 1.08;
+}
+.selected-summary span {
+  color: var(--jk-t2);
+  font-size: var(--jk-fs-note);
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+}
+.details-form {
+  display: grid;
+  gap: var(--jk-s4);
+}
+.details-form label {
+  margin-top: 0;
+}
+.confirm-button,
+#confirm-reschedule,
+.meet-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  justify-self: start;
+  min-height: 44px;
+  margin-top: var(--jk-s2);
+  padding: 10px 18px;
+  border: 0;
+  border-radius: var(--jk-r-pill);
+  background: var(--jk-accent);
+  color: var(--on-accent);
+  font: 700 15px/1 var(--jk-font);
+  text-decoration: none;
+  cursor: pointer;
+}
+.confirm-button:disabled,
+#confirm-reschedule:disabled {
+  background: var(--jk-surface-2);
+  color: var(--jk-t2);
+  cursor: default;
+  opacity: 1;
+}
+.confirm-button:hover,
+#confirm-reschedule:hover:not(:disabled),
+.meet-link:hover,
+.duration-option.selected:hover {
+  background: var(--book-accent-hover);
+  color: var(--on-accent);
+  filter: none;
+}
+
+.success-step {
+  max-width: 640px;
+  margin-top: var(--jk-group-gap);
+}
+/* Once the meeting is booked, the date chapter question is no longer the page. */
+.jk-ch:has(#success-step:not(.hidden)) > .jk-ct,
+.jk-cb:has(#success-step:not(.hidden)) .book-host {
+  display: none;
+}
+.jk-cb:has(#success-step:not(.hidden)) .success-step {
+  margin-top: var(--jk-s2);
+}
+.jk-cb:has(#success-step:not(.hidden)) .success-step h2 {
+  font-size: var(--jk-fs-title);
+}
+.success-mark {
+  display: block;
+  width: 28px;
+  height: 28px;
+  margin-bottom: var(--jk-s3);
+  color: var(--jk-accent-text);
+}
+.success-mark svg {
+  width: 28px;
+  height: 28px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.success-step .jk-eb {
+  margin-bottom: var(--jk-s2);
+}
+.success-copy {
+  margin-top: var(--jk-s3);
+  max-width: 62ch;
+  color: var(--jk-t2);
+  font-size: var(--jk-fs-body);
+  line-height: 1.5;
+}
+#confirmed-title {
+  margin-top: var(--jk-s3);
+  font-size: 20px;
+  font-weight: 650;
+  letter-spacing: -0.02em;
+  overflow-wrap: anywhere;
+}
+#manage-booking {
+  color: var(--jk-accent-text);
+  font-weight: 650;
+  text-underline-offset: 3px;
+}
+.success-step p + p {
+  margin-top: var(--jk-s4);
+}
+
+.booking-footer {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-top: var(--jk-s10);
+  padding: var(--jk-s5) 0 calc(var(--jk-s8) + env(safe-area-inset-bottom));
+  border-top: 1px solid var(--jk-hair);
+  color: var(--jk-t3);
+  font-size: var(--jk-fs-sm);
+}
+.booking-footer a {
+  color: var(--jk-t2);
+  text-underline-offset: 3px;
+}
+
+/* Privacy is prose on the background. No glass panel. */
+.privacy-page .jk-group h2 {
+  margin-bottom: var(--jk-s3);
+}
+.privacy-page .jk-cb p {
+  max-width: 68ch;
+  color: var(--jk-ink);
+  font-size: var(--jk-fs-body);
+  line-height: 1.5;
+}
+.privacy-page .jk-cb p + p {
+  margin-top: var(--jk-s3);
+}
+.privacy-page a {
+  color: var(--jk-accent-text);
+  text-underline-offset: 3px;
+}
+.privacy-page .updated {
+  color: var(--jk-t2);
+  font-size: var(--jk-fs-note);
+}
+
+/* Guest management. Summary on the page; actions in the one glass panel. */
+#meeting-heading {
+  overflow-wrap: anywhere;
+}
+.manage-page .selected-summary {
+  margin-top: var(--jk-hero-gap);
+}
+.manage-panel:not(:has(> :not(.hidden))) {
+  display: none;
+}
+.account-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+.account-confirm,
+#pending-change,
+#reschedule-panel {
+  display: grid;
+  gap: var(--jk-s3);
+  justify-items: start;
+}
+.account-confirm p,
+#pending-change p,
+#reschedule-panel .note,
+.reschedule-fields,
+.manage-slots {
+  justify-self: stretch;
+  width: 100%;
+}
+.account-confirm h3,
+#reschedule-panel h3,
+#pending-change p,
+.account-confirm p,
+.manage-page .note {
+  margin: 0;
+  color: var(--jk-t2);
+  font-size: var(--jk-fs-note);
+  font-weight: 500;
+  letter-spacing: 0;
+  line-height: 1.45;
+  text-transform: none;
+}
+.account-confirm h3,
+#reschedule-panel h3 {
+  color: var(--jk-ink);
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+.account-button {
+  min-height: 44px;
+  padding: 8px 14px;
+  border: 0;
+  border-radius: var(--jk-r-pill);
+  background: transparent;
+  box-shadow: inset 0 0 0 1.5px var(--jk-ink-2);
+  color: var(--jk-ink);
+  font: 650 14px/1 var(--jk-font);
+  cursor: pointer;
+}
+.account-button:hover {
+  background: var(--jk-surface-2);
+}
+.account-button.danger {
+  color: var(--jk-fail);
+  box-shadow: inset 0 0 0 1.5px var(--jk-fail);
+}
+.account-button.danger:hover {
+  background: transparent;
+}
+.reschedule-fields {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: var(--jk-s4);
+}
+.reschedule-fields label {
+  margin-top: 0;
+}
+.manage-slots {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0;
+  color: var(--jk-t2);
+  font-size: var(--jk-fs-note);
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+}
+.manage-slots button.selected {
+  background: var(--jk-accent);
+  color: var(--on-accent);
+  box-shadow: none;
+}
+.manage-slots button.selected:hover {
+  background: var(--book-accent-hover);
+  color: var(--on-accent);
+}
+.manage-page .jk-note {
+  margin-top: var(--jk-s4);
+}
+
+@container (min-width: 760px) {
+  .date-time-grid {
+    grid-template-columns: minmax(280px, 400px) minmax(200px, 260px);
+    column-gap: var(--jk-s8);
+    align-items: start;
+  }
+  .times-panel {
+    border-left: 1px solid var(--jk-hair);
+    padding-left: var(--jk-s6);
+  }
+}
+
+@media (max-width: 759px) {
+  .times-list {
+    max-height: none;
+  }
+  .calendar {
+    max-width: none;
+  }
+}
+
+@media (max-width: 680px) {
+  .reschedule-fields {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .booking-page .jk-top {
+    gap: 8px;
+    padding-left: 12px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .loading-times i {
+    animation: none;
+  }
+  .confirm-button:hover,
+  #confirm-reschedule:hover:not(:disabled),
+  .meet-link:hover {
+    filter: none;
+  }
+}
+html.jk-rm .loading-times i {
+  animation: none;
+}
+html.jk-rm .confirm-button:hover,
+html.jk-rm #confirm-reschedule:hover,
+html.jk-rm .meet-link:hover {
+  filter: none;
+}
+
+@media (forced-colors: active) {
+  .calendar-grid button.selected,
+  .duration-option.selected,
+  .time-choice.selected .next-button,
+  .manage-slots button.selected,
+  .confirm-button,
+  .meet-link {
+    outline: 2px solid CanvasText;
+  }
+  .calendar-grid button.today:not(.selected) {
+    outline: 1px solid CanvasText;
+  }
+}

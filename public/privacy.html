@@ -1,29 +1,64 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="dark"><meta name="referrer" content="no-referrer">
-  <title>Privacy · Book with Jaack</title><link rel="icon" href="/assets/favicon.png"><link rel="stylesheet" href="/assets/app.css?v=d368bb8ea2e32412">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="color-scheme" content="light dark">
+  <meta name="referrer" content="no-referrer">
+  <title>Privacy · Book with Jaack</title>
+  <link rel="icon" href="/assets/favicon.png">
+  <script src="/assets/jaack/theme.js" data-light-from="7" data-light-to="19" data-key="jaack.theme"></script>
+  <link rel="stylesheet" href="/assets/jaack/jaack.css">
+  <link rel="stylesheet" href="/assets/app.css?v=7e6648c678465ab7">
+  <script src="/assets/jaack/jaack.js" defer></script>
 </head>
-<body>
-  <main class="shell">
-    <nav><a class="brand" href="/">jaack<span>.</span></a><a class="nav-link" href="/">Book a meeting ↗</a></nav>
-    <section class="owner-hero"><div class="eyebrow">Book with Jaack</div><h1>Privacy</h1><p class="lede">How this booking service handles your information.</p></section>
-    <section class="panel settings" aria-label="Privacy policy">
-      <h2>Who runs this service</h2>
-      <p>Giacomo Barbieri (Jaack) operates book.jaack.me. For privacy questions or a request about your booking data, email <a href="mailto:giacomobarbieri94@gmail.com">giacomobarbieri94@gmail.com</a>.</p>
-      <h2>Booking a meeting</h2>
-      <p>When you book, the service uses your name, email address, chosen time, and optional meeting title to create a Google Calendar event and send you an invitation with a Google Meet link. It keeps a local booking record so the meeting can be confirmed, changed, or cancelled. A private link in the invitation lets anyone holding it view or manage that booking; please do not forward it casually.</p>
-      <h2>Calendar access</h2>
-      <p>Only Jaack connects Google accounts. The service reads his calendar list, time zone, availability, and timed event details to find safe meeting times, with the configured spacing between meetings. It creates, updates, and cancels booking events in the selected Google Calendar account. Google OAuth tokens are encrypted in the local booking database. Visitor Google accounts are never connected to this service.</p>
-      <p>Availability refreshes in the background every minute. Recent times can stay visible while the page checks for changes, for at most two minutes from the calendar read. Booking confirmation always checks Google Calendar again.</p>
-      <h2>Other services</h2>
-      <p>Google Calendar and Google Meet support scheduling. Travel routing is not used. Cloudflare carries traffic to the booking service. Tailscale protects the private owner dashboard. Photon, based on OpenStreetMap data, is used only when Jaack searches for his private base address. Every six hours, a background worker sends Jev aggregate workload information to make bounded scheduling suggestions; it does not receive calendar titles, guest names, email addresses, or addresses.</p>
-      <p>The public gateway limits abusive requests using an IP-derived identifier and logs the request time, route, status, and a shortened hash of that identifier. The private owner dashboard uses an expiring session cookie. Google Calendar data is used to provide this booking service, not for advertising, sale, or training a general-purpose AI model.</p>
-      <h2>Storage and requests</h2>
-      <p>Booking and account records are stored on Jaack’s Mac. Google account tokens are encrypted, and the owner dashboard is limited to Jaack’s private network. Booking records remain for scheduling history and reconciliation; there is no automatic deletion schedule. You can request access to or deletion of your booking information by emailing the address above. Jaack can also disconnect a Google account through the private dashboard; this removes this service’s stored connection without deleting events already in Google Calendar. Google’s own privacy policy applies to data processed by Google services.</p>
-      <p>Last updated: 28 September 2026.</p>
-    </section>
-    <footer class="footer"><span>Giacomo Barbieri / Jaack</span></footer>
+<body class="booking-page privacy-page">
+  <div class="jk-bg" aria-hidden="true"><i></i><i></i><i></i></div>
+  <a class="skip-link" href="#privacy">Skip to privacy</a>
+  <header class="jk-top jk-glass">
+    <a class="jk-mark" href="/">jaack<span class="dot">.</span><span class="dom">me</span></a>
+    <span class="jk-tag">Privacy</span>
+    <nav class="jk-links" aria-label="Site">
+      <a class="jk-sw keep" href="/">Book</a>
+    </nav>
+    <span data-jk-theme-switch></span>
+  </header>
+  <main class="jk-page" id="privacy">
+    <div class="jk-chs">
+      <section class="jk-ch" aria-labelledby="privacy-title">
+        <header class="jk-ct">
+          <p class="jk-eb">Book with Jaack</p>
+          <h1 class="jk-q" id="privacy-title">Privacy</h1>
+          <p class="jk-lede">How this booking service handles your information.</p>
+        </header>
+        <div class="jk-cb">
+          <section class="jk-group" aria-labelledby="who">
+            <h2 id="who">Who runs this service</h2>
+            <p>Giacomo Barbieri (Jaack) operates book.jaack.me. For privacy questions or a request about your booking data, email <a href="mailto:giacomobarbieri94@gmail.com">giacomobarbieri94@gmail.com</a>.</p>
+          </section>
+          <section class="jk-group" aria-labelledby="booking-data">
+            <h2 id="booking-data">Booking a meeting</h2>
+            <p>When you book, the service uses your name, email address, chosen time, and optional meeting title to create a Google Calendar event and send you an invitation with a Google Meet link. It keeps a local booking record so the meeting can be confirmed, changed, or cancelled. A private link in the invitation lets anyone holding it view or manage that booking; please do not forward it casually.</p>
+          </section>
+          <section class="jk-group" aria-labelledby="calendar-access">
+            <h2 id="calendar-access">Calendar access</h2>
+            <p>Only Jaack connects Google accounts. The service reads his calendar list, time zone, availability, and timed event details to find safe meeting times, with the configured spacing between meetings. It creates, updates, and cancels booking events in the selected Google Calendar account. Google OAuth tokens are encrypted in the local booking database. Visitor Google accounts are never connected to this service.</p>
+            <p>Availability refreshes in the background every minute. Recent times can stay visible while the page checks for changes, for at most two minutes from the calendar read. Booking confirmation always checks Google Calendar again.</p>
+          </section>
+          <section class="jk-group" aria-labelledby="other-services">
+            <h2 id="other-services">Other services</h2>
+            <p>Google Calendar and Google Meet support scheduling. Travel routing is not used. Cloudflare carries traffic to the booking service. Tailscale protects the private owner dashboard. Photon, based on OpenStreetMap data, is used only when Jaack searches for his private base address. Every six hours, a background worker sends Jev aggregate workload information to make bounded scheduling suggestions; it does not receive calendar titles, guest names, email addresses, or addresses.</p>
+            <p>The public gateway limits abusive requests using an IP-derived identifier and logs the request time, route, status, and a shortened hash of that identifier. The private owner dashboard uses an expiring session cookie. Google Calendar data is used to provide this booking service, not for advertising, sale, or training a general-purpose AI model.</p>
+          </section>
+          <section class="jk-group" aria-labelledby="storage">
+            <h2 id="storage">Storage and requests</h2>
+            <p>Booking and account records are stored on Jaack’s Mac. Google account tokens are encrypted, and the owner dashboard is limited to Jaack’s private network. Booking records remain for scheduling history and reconciliation; there is no automatic deletion schedule. You can request access to or deletion of your booking information by emailing the address above. Jaack can also disconnect a Google account through the private dashboard; this removes this service’s stored connection without deleting events already in Google Calendar. Google’s own privacy policy applies to data processed by Google services.</p>
+            <p class="updated">Last updated: 28 September 2026.</p>
+          </section>
+        </div>
+      </section>
+    </div>
+    <footer class="booking-footer"><span>Giacomo Barbieri / Jaack</span></footer>
   </main>
 </body>
 </html>

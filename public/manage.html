@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="color-scheme" content="light dark">
+  <meta name="referrer" content="no-referrer">
+  <title>Manage your meeting · Jaack</title>
+  <link rel="icon" href="/assets/favicon.png?v=1">
+  <script src="/assets/jaack/theme.js" data-light-from="7" data-light-to="19" data-key="jaack.theme"></script>
+  <link rel="stylesheet" href="/assets/jaack/jaack.css">
+  <link rel="stylesheet" href="/assets/app.css?v=7e6648c678465ab7">
+  <script src="/assets/jaack/jaack.js" defer></script>
+</head>
+<body class="booking-page manage-page">
+  <div class="jk-bg" aria-hidden="true"><i></i><i></i><i></i></div>
+  <a class="skip-link" href="#manage">Skip to your meeting</a>
+  <header class="jk-top jk-glass">
+    <a class="jk-mark" href="/">jaack<span class="dot">.</span><span class="dom">me</span></a>
+    <span class="jk-tag">Booking</span>
+    <nav class="jk-links" aria-label="Site">
+      <a class="jk-sw keep" href="/">Book</a>
+    </nav>
+    <span data-jk-theme-switch></span>
+  </header>
+  <main class="jk-page" id="manage">
+    <div class="jk-chs">
+      <section class="jk-ch" aria-labelledby="meeting-heading">
+        <header class="jk-ct">
+          <p class="jk-eb">Your booking</p>
+          <h1 class="jk-q" id="meeting-heading">Loading your meeting…</h1>
+          <p class="jk-lede">Choose another time or cancel your meeting with Jaack.</p>
+        </header>
+        <div class="jk-cb">
+          <div id="meeting-summary" class="selected-summary"></div>
+          <p id="manage-status" class="status hidden" role="status" aria-live="polite"></p>
+          <div class="jk-glass jk-panel manage-panel">
+            <div id="manage-actions" class="account-actions hidden">
+              <button type="button" class="account-button" id="show-reschedule">Reschedule meeting</button>
+              <button type="button" class="account-button danger" id="show-cancel">Cancel meeting</button>
+            </div>
+            <div id="pending-change" class="hidden">
+              <p class="note">Your previous request has not been confirmed yet. Retry to check and finish the same change.</p>
+              <button id="retry-change" class="account-button" type="button">Retry pending change</button>
+            </div>
+            <div id="cancel-confirmation" class="account-confirm hidden">
+              <h3>Cancel this meeting?</h3>
+              <p>This removes the meeting from the calendar and sends a cancellation to the attendees.</p>
+              <button type="button" class="account-button danger" id="confirm-cancel">Yes, cancel meeting</button>
+              <button type="button" class="account-button" id="keep-meeting">Keep meeting</button>
+            </div>
+            <section id="reschedule-panel" class="hidden" aria-labelledby="reschedule-heading">
+              <h3 id="reschedule-heading">Choose a new time</h3>
+              <p class="note">Your current time stays reserved until the new time is confirmed. The meeting length and Google Meet link stay the same.</p>
+              <div class="reschedule-fields">
+                <label for="new-date">New date<input type="date" id="new-date" required></label>
+                <label for="manage-timezone">Display time zone<select id="manage-timezone"></select></label>
+              </div>
+              <div id="new-slots" class="manage-slots" aria-live="polite"></div>
+              <p id="new-time-summary" class="note"></p>
+              <button type="button" id="confirm-reschedule" disabled>Confirm new time</button>
+            </section>
+          </div>
+          <p class="jk-note">Keep this invitation link private. Anyone with it can manage this meeting.</p>
+        </div>
+      </section>
+    </div>
+    <footer class="booking-footer"><span>Giacomo Barbieri / Jaack · <a href="/privacy">Privacy</a></span><span id="management-demo"></span></footer>
+  </main>
+  <script type="module" src="/assets/manage.js?v=1"></script>
+</body>
+</html>

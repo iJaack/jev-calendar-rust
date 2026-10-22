@@ -2,125 +2,124 @@
 <html lang="en">
   <head>
     <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width,initial-scale=1">
-    <meta name="color-scheme" content="dark">
+    <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+    <meta name="color-scheme" content="light dark">
     <title>Jev Calendar · Book a meeting with Jaack</title>
     <link rel="icon" href="/assets/favicon.png?v=1" type="image/png">
-    <link rel="stylesheet" href="/assets/app.css?v=d368bb8ea2e32412">
+    <script src="/assets/jaack/theme.js" data-light-from="7" data-light-to="19" data-key="jaack.theme"></script>
+    <link rel="stylesheet" href="/assets/jaack/jaack.css">
+    <link rel="stylesheet" href="/assets/app.css?v=7e6648c678465ab7">
+    <script src="/assets/jaack/jaack.js" defer></script>
   </head>
   <body class="booking-page">
+    <div class="jk-bg" aria-hidden="true"><i></i><i></i><i></i></div>
     <a class="skip-link" href="#scheduler">Skip to booking</a>
-    <header class="booking-header">
-      <a class="booking-brand" href="/" aria-label="Jaack booking home">
-        jaack<span>.</span>
-      </a>
-      <a class="nav-link" href="https://jaack.me/">Back to jaack.me ↗</a>
+    <header class="jk-top jk-glass">
+      <a class="jk-mark" href="/" aria-label="Jaack booking home">jaack<span class="dot">.</span><span class="dom">me</span></a>
+      <span class="jk-tag">Book</span>
+      <nav class="jk-links" aria-label="Site">
+        <a class="jk-sw keep" href="https://jaack.me/">jaack.me</a>
+      </nav>
+      <span data-jk-theme-switch></span>
     </header>
 
-    <main class="scheduler" id="scheduler">
-      <aside class="event-panel">
-        <img class="host-avatar" src="/assets/jaack-portrait.jpg" alt="Jaack’s profile photo" width="52" height="52">
-        <p class="host-name">Jaack · Jev Calendar</p>
-        <h1>Meet with Jaack</h1>
-        <p class="event-copy">Choose a time that works for you. Meetings are on Google Meet, and availability already accounts for Jaack’s existing commitments.</p>
+    <main class="jk-page" id="scheduler">
+      <div class="jk-chs">
+        <section class="jk-ch" aria-labelledby="book-title">
+          <header class="jk-ct">
+            <p class="jk-eb">Date &amp; time</p>
+            <h1 class="jk-q" id="book-title">Meet with Jaack</h1>
+            <p class="jk-lede">Choose a time that works for you. Meetings are on Google Meet, and availability already accounts for Jaack’s existing commitments.</p>
+          </header>
 
-        <dl class="event-meta">
-          <div>
-            <dt><svg aria-hidden="true" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.8v4.7l3 1.8"/></svg></dt>
-            <dd><span id="duration-label">30 min</span></dd>
-          </div>
-          <div>
-            <dt><svg aria-hidden="true" viewBox="0 0 24 24"><rect x="3.5" y="5" width="12" height="14" rx="2"/><path d="m15.5 10 5-3v10l-5-3"/></svg></dt>
-            <dd>Google Meet</dd>
-          </div>
-          <div>
-            <dt><svg aria-hidden="true" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M3.5 12h17M12 3.5c2.2 2.3 3.4 5.1 3.4 8.5S14.2 18.2 12 20.5C9.8 18.2 8.6 15.4 8.6 12S9.8 5.8 12 3.5Z"/></svg></dt>
-            <dd>Jaack: <span id="host-timezone">Europe/Rome</span></dd>
-          </div>
-        </dl>
-
-        <div class="field-group duration-group">
-          <span class="field-label">Meeting length</span>
-          <div class="duration-options" role="radiogroup" aria-label="Meeting length">
-            <button type="button" class="duration-option selected" data-duration="30" role="radio" aria-checked="true">30m</button>
-            <button type="button" class="duration-option" data-duration="45" role="radio" aria-checked="false">45m</button>
-            <button type="button" class="duration-option" data-duration="60" role="radio" aria-checked="false">60m</button>
-          </div>
-        </div>
-
-      </aside>
-
-      <section class="picker-panel" aria-live="polite">
-        <div id="date-step">
-          <div class="picker-heading">
-            <div>
-              <p class="step-kicker">Date &amp; time</p>
-              <h2>Select a date</h2>
+          <div class="jk-cb">
+            <div class="book-host">
+              <img class="host-avatar" src="/assets/jaack-portrait.jpg" alt="Jaack’s profile photo" width="40" height="40">
+              <p>Jaack · <span id="duration-label">30 min</span> · Google Meet · <span id="host-timezone">Europe/Rome</span></p>
             </div>
-            <span class="live-calendar"><i></i> Live availability</span>
-          </div>
 
-          <div class="date-time-grid">
-            <div class="calendar" aria-label="Choose a date">
-              <div class="calendar-nav">
-                <button type="button" id="previous-month" aria-label="Previous month">
-                  <svg aria-hidden="true" viewBox="0 0 24 24"><path d="m15 18-6-6 6-6"/></svg>
-                </button>
-                <strong id="month-label"></strong>
-                <button type="button" id="next-month" aria-label="Next month">
-                  <svg aria-hidden="true" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></svg>
-                </button>
+            <div id="date-step">
+              <div class="book-tools">
+                <div>
+                  <span class="field-label" id="length-label">Meeting length</span>
+                  <div class="duration-options" role="radiogroup" aria-labelledby="length-label">
+                    <button type="button" class="duration-option selected" data-duration="30" role="radio" aria-checked="true">30m</button>
+                    <button type="button" class="duration-option" data-duration="45" role="radio" aria-checked="false">45m</button>
+                    <button type="button" class="duration-option" data-duration="60" role="radio" aria-checked="false">60m</button>
+                  </div>
+                </div>
+                <span class="live-calendar"><i aria-hidden="true"></i> Live availability</span>
               </div>
-              <div class="weekdays" aria-hidden="true"><span>MON</span><span>TUE</span><span>WED</span><span>THU</span><span>FRI</span><span>SAT</span><span>SUN</span></div>
-              <div class="calendar-grid" id="calendar-grid"></div>
-              <label class="timezone-row" for="viewer-timezone">
-                <svg aria-hidden="true" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M3.5 12h17M12 3.5c2.2 2.3 3.4 5.1 3.4 8.5S14.2 18.2 12 20.5C9.8 18.2 8.6 15.4 8.6 12S9.8 5.8 12 3.5Z"/></svg>
-                <span class="sr-only">Display time zone</span>
-                <select id="viewer-timezone" aria-label="Display time zone"></select>
-              </label>
+
+              <div class="date-time-grid">
+                <div class="calendar" role="group" aria-label="Choose a date">
+                  <div class="calendar-nav">
+                    <button type="button" id="previous-month" aria-label="Previous month">
+                      <svg aria-hidden="true" viewBox="0 0 24 24"><path d="m15 18-6-6 6-6"/></svg>
+                    </button>
+                    <strong id="month-label"></strong>
+                    <button type="button" id="next-month" aria-label="Next month">
+                      <svg aria-hidden="true" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></svg>
+                    </button>
+                  </div>
+                  <div class="weekdays" aria-hidden="true"><span>Mon</span><span>Tue</span><span>Wed</span><span>Thu</span><span>Fri</span><span>Sat</span><span>Sun</span></div>
+                  <div class="calendar-grid" id="calendar-grid"></div>
+                  <p class="book-key"><span class="is-today" aria-hidden="true"></span> Today <span class="gap" aria-hidden="true"></span> <span class="is-suggested" aria-hidden="true"></span> Suggested</p>
+                  <label class="timezone-row" for="viewer-timezone">Time zone
+                    <select id="viewer-timezone"></select>
+                  </label>
+                </div>
+
+                <div class="times-panel" id="times-panel">
+                  <p class="times-date" id="times-date">Choose a date</p>
+                  <small class="times-hint">Suggested times first</small>
+                  <div class="times-list" id="slots" aria-live="polite" aria-labelledby="times-date"><p class="times-empty">Available times will appear here.</p></div>
+                </div>
+              </div>
+              <p class="inline-status hidden" id="availability-status" role="status"></p>
+              <button type="button" class="retry-dates hidden" id="retry-dates">Check dates again</button>
             </div>
 
-            <div class="times-panel" id="times-panel">
-              <p class="times-date" id="times-date">Choose a date</p>
-              <small class="times-hint">Suggested times first</small>
-              <div class="times-list" id="slots"><p class="times-empty">Available times will appear here.</p></div>
+            <div class="details-step hidden" id="details-step">
+              <button type="button" class="back-button" id="back-to-calendar">
+                <svg aria-hidden="true" viewBox="0 0 24 24"><path d="m15 18-6-6 6-6"/></svg>
+                Back
+              </button>
+              <div class="jk-glass jk-panel book-form">
+                <p class="jk-lab">Almost done</p>
+                <h2>Enter your details</h2>
+                <div class="selected-summary" id="selected-summary"></div>
+                <form id="booking-form" class="details-form">
+                  <label for="guest-name">Name
+                    <input id="guest-name" maxlength="120" required autocomplete="name" placeholder="Your name">
+                  </label>
+                  <label for="guest-email">Email
+                    <input id="guest-email" type="email" maxlength="254" required autocomplete="email" placeholder="you@example.com">
+                  </label>
+                  <label for="meeting-title">Meeting title (optional)
+                    <input id="meeting-title" maxlength="200" placeholder="What would you like to discuss?">
+                  </label>
+                  <button type="submit" class="confirm-button">Schedule event</button>
+                </form>
+                <p class="inline-status hidden" id="booking-status" role="status"></p>
+              </div>
+            </div>
+
+            <div class="success-step hidden" id="success-step">
+              <span class="success-mark" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="m6 12.5 4 4 8-9"/></svg></span>
+              <p class="jk-eb">Confirmed</p>
+              <h2>You’re scheduled</h2>
+              <p id="confirmed-title"></p>
+              <p class="success-copy">Your calendar invitation includes the Google Meet link and links to cancel or reschedule.</p>
+              <div class="selected-summary" id="success-summary"></div>
+              <a class="meet-link hidden" id="meet-link" target="_blank" rel="noopener noreferrer">Open Google Meet</a>
+              <p><a class="hidden" id="manage-booking">Cancel or reschedule this meeting</a></p>
             </div>
           </div>
-          <p class="inline-status hidden" id="availability-status"></p>
-          <button type="button" class="retry-dates hidden" id="retry-dates">Check dates again</button>
-        </div>
-
-        <div class="details-step hidden" id="details-step">
-          <button type="button" class="back-button" id="back-to-calendar">
-            <svg aria-hidden="true" viewBox="0 0 24 24"><path d="m15 18-6-6 6-6"/></svg>
-            Back
-          </button>
-          <p class="step-kicker">Almost done</p>
-          <h2>Enter your details</h2>
-          <div class="selected-summary" id="selected-summary"></div>
-          <form id="booking-form" class="details-form">
-            <label>Name<input id="guest-name" maxlength="120" required autocomplete="name" placeholder="Your name"></label>
-            <label>Email<input id="guest-email" type="email" maxlength="254" required autocomplete="email" placeholder="you@example.com"></label>
-            <label>Meeting title (optional)<input id="meeting-title" maxlength="200" placeholder="What would you like to discuss?"></label>
-            <button type="submit" class="confirm-button">Schedule event</button>
-          </form>
-          <p class="inline-status hidden" id="booking-status"></p>
-        </div>
-
-        <div class="success-step hidden" id="success-step">
-          <div class="success-icon"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="m6 12.5 4 4 8-9"/></svg></div>
-          <p class="step-kicker">Confirmed</p>
-          <h2>You’re scheduled</h2>
-          <p id="confirmed-title"></p>
-          <p class="success-copy">Your calendar invitation includes the Google Meet link and links to cancel or reschedule.</p>
-          <div class="selected-summary" id="success-summary"></div>
-          <a class="meet-link hidden" id="meet-link" target="_blank" rel="noopener noreferrer">Open Google Meet</a>
-          <p><a class="hidden" id="manage-booking">Cancel or reschedule this meeting</a></p>
-        </div>
-      </section>
+        </section>
+      </div>
+      <footer class="booking-footer"><span>Giacomo Barbieri / Jaack · <a href="/privacy">Privacy</a></span><span id="demo-note"></span></footer>
     </main>
-
-    <footer class="booking-footer"><span>Giacomo Barbieri / Jaack · <a href="/privacy">Privacy</a></span><span id="demo-note"></span></footer>
     <script type="module" src="/assets/public.js?v=a57895decc52ad0c"></script>
   </body>
 </html>
