@@ -444,7 +444,7 @@
 .time-choice.selected .next-button {
   width: auto;
   min-width: 76px;
-  min-height: 36px;
+  min-height: 40px;
   margin: 4px 0;
   padding: 0 14px;
   border-radius: var(--jk-r-pill);
@@ -580,6 +580,17 @@
   max-width: 640px;
   margin-top: var(--jk-group-gap);
 }
+/* Once the meeting is booked, the date chapter question is no longer the page. */
+.jk-ch:has(#success-step:not(.hidden)) > .jk-ct,
+.jk-cb:has(#success-step:not(.hidden)) .book-host {
+  display: none;
+}
+.jk-cb:has(#success-step:not(.hidden)) .success-step {
+  margin-top: var(--jk-s2);
+}
+.jk-cb:has(#success-step:not(.hidden)) .success-step h2 {
+  font-size: var(--jk-fs-title);
+}
 .success-mark {
   display: block;
   width: 28px;
@@ -667,7 +678,7 @@
 .manage-page .selected-summary {
   margin-top: var(--jk-hero-gap);
 }
-.manage-panel:not(:has(:not(.hidden))) {
+.manage-panel:not(:has(> :not(.hidden))) {
   display: none;
 }
 .account-actions {
