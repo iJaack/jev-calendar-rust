@@ -134,6 +134,20 @@ test('opening booking details stops preview timers and ignores an in-flight rech
   assert.ok(f.context.state.availabilityRequest>requestId,'Earlier preview responses cannot interrupt details');
 });
 
+test('booking layout follows the container and the visible viewport',()=>{
+  const css=readFileSync(new URL('../public/assets/app.css',import.meta.url),'utf8');
+  assert.match(css,/body\.booking-page\s*\{[^}]*min-height:\s*100dvh/);
+  assert.match(css,/@container \(min-width: 520px\)/);
+  assert.match(css,/env\(safe-area-inset-left\)/);
+  assert.match(css,/env\(safe-area-inset-right\)/);
+  assert.match(css,/@media \(max-height: 500px\)/);
+  assert.doesNotMatch(css,/innerWidth|navigator\.userAgent/);
+  for(const page of ['index.html','privacy.html','manage.html']) {
+    const html=readFileSync(new URL('../public/'+page,import.meta.url),'utf8');
+    assert.match(html,/viewport-fit=cover/);
+  }
+});
+
 test('booking and privacy asset versions identify the exact shipped contents',()=>{
  for(const page of ['index.html','privacy.html']) {
   const html=readFileSync(new URL('../public/'+page,import.meta.url),'utf8');
