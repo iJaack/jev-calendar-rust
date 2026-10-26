@@ -24,6 +24,8 @@ The authoritative oracle is reference/, identified by evidence/baseline-manifest
 
 State keeps settings, legacy tokens, google_accounts with versions, hashed sessions, bookings with source IDs/revisions/pending changes, booking_slot_outcomes and jaack_os_booking_changes. Legacy columns are added only if absent. No applied schema is dropped or renamed. Settings JSON canonicalizes whole numbers for Node-compatible learning signatures.
 
+When valid booking types are enabled, creation validates the requested/default type and writable destination, persists its account/calendar, and preserves that destination for later management even after rollback; inactive creation and legacy NULL calendars retain primary-calendar behavior.
+
 Cryptographic compatibility: SHA-256 derives the AES-256-GCM key; encrypted storage is base64url of 12-byte nonce, 16-byte tag and ciphertext. Management links use the existing jev-booking-management-v1 HMAC domain and URL fragment. Signed Photon choices and JAACK OS request hashing remain compatible. Test secrets are synthetic.
 
 Scheduling preserves host/viewer date boundaries, owner hours, workday clamping, DST, notice, busy conflicts/buffers, weekly focus/deadline policy, ranking and partial-month failure. TripIt flight/hotel inference applies date-specific host zones and buffered transit blocks to previews and fresh booking/change verification, with conservative fallback and the `JEV_TRAVEL_TIMEZONES=off|0|false` legacy-path rollback. Free/busy uses every accessible calendar, including hidden/shared calendars and freeBusyReader accounts. Event details from freeBusyReader calendars are never requested. Raw guest/event/project/address details are excluded from advisory aggregates and public workload responses.

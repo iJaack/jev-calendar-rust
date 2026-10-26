@@ -160,3 +160,97 @@ test('booking and privacy asset versions identify the exact shipped contents',()
   }
  }
 });
+
+/* Spec Tests: Frontend radio group rendered only when /api/config is configured,
+ * required and accessible, no multi-option preselection, selected value posted,
+ * confirmation label shown; content-digest asset references remain consistent.
+ * Execute HTML/JS fetched from the Rust binary with only local API responses.
+ */
+async function bookingTypeFrontend(t,bookingTypes) {
+ const [{spawn},{once},{createServer},{mkdtempSync,rmSync},{tmpdir},{join},{testDocument}]=await Promise.all([
+  import('node:child_process'),import('node:events'),import('node:http'),import('node:fs'),import('node:os'),import('node:path'),import('./booking-types-dom.mjs'),
+ ]);
+ const root=new URL('..',import.meta.url).pathname,dir=mkdtempSync(join(tmpdir(),'jev-types-ui-'));
+ const listener=createServer().listen(0,'127.0.0.1');await once(listener,'listening');const port=listener.address().port;await new Promise(r=>listener.close(r));
+ const origin=`http://127.0.0.1:${port}`;
+ const child=spawn(root+'target/debug/jev-calendar',['--private'],{cwd:root,env:{PATH:process.env.PATH,PORT:String(port),DATABASE_PATH:join(dir,'ui.sqlite'),APP_ENCRYPTION_KEY:'synthetic-ui-key',DEMO_MODE:'true',APP_BASE_URL:origin,JEV_ASSET_ROOT:root+'public'},stdio:['ignore','pipe','pipe']});
+ t.after(async()=>{if(child.exitCode===null){child.kill();await once(child,'exit');}rmSync(dir,{recursive:true,force:true});});
+ let stderr='';child.stderr.on('data',d=>stderr+=d);
+ await Promise.race([once(child.stdout,'data'),once(child,'exit').then(()=>{throw Error('UI fixture startup failed: '+stderr);})]);
+ const htmlResponse=await fetch(origin+'/');assert.equal(htmlResponse.status,200);const html=await htmlResponse.text();
+ const script=html.match(/<script[^>]+src="([^"]*public\.js[^\"]*)"/)[1];
+ const jsResponse=await fetch(origin+script);assert.equal(jsResponse.status,200);const shipped=await jsResponse.text();
+ const document=testDocument(html),calls=[];
+ const slot={start:'2030-10-07T12:00:00.000Z',end:'2030-10-07T12:30:00.000Z'};
+ const context=vm.createContext({document,Intl,Date,URL,URLSearchParams,Map,Set,console,performance:{now:()=>1000},setTimeout:()=>1,clearTimeout(){},crypto:{randomUUID:()=> 'synthetic-ui-request-key'},
+  FormData:class{constructor(form){this.entries=form.querySelectorAll('input').filter(n=>n.name&&(n.type!=='radio'||n.checked)).map(n=>[n.name,n.value]);}get(name){return this.entries.find(e=>e[0]===name)?.[1]??null;}[Symbol.iterator](){return this.entries[Symbol.iterator]();}},
+  fetch:async(path,options={})=>{
+   assert.ok(String(path).startsWith('/'),'frontend must only request local API paths');
+   const body=options.body?JSON.parse(options.body):undefined;calls.push({path,body});
+   let value={};if(path==='/api/config')value={hostTimezone:'Europe/Rome',...(bookingTypes?{bookingTypes,defaultBookingType:bookingTypes[0].id}:{})};
+   else if(path==='/api/available-dates')value={dates:[]};
+   else if(path==='/api/book')value={booking:{meetingTitle:'Synthetic UI booking',bookingType:body.bookingType,bookingTypeLabel:bookingTypes?.find(v=>v.id===body.bookingType)?.label,managementUrl:'https://book.example.test/manage#synthetic'}};
+   else throw Error('Unexpected frontend API request '+path);
+   return {ok:true,json:async()=>value};
+  },
+ });
+ vm.runInContext(shipped,context);await new Promise(r=>setImmediate(r));
+ // Select a synthetic offer, as the existing preview tests do, then use the real
+ // details form and its registered submit handler without replacing that code.
+ vm.runInContext(`state.selectedDate='2030-10-07';showDetails(${JSON.stringify(slot)});`,context);
+ document.getElementById('guest-name').value='Synthetic Guest';document.getElementById('guest-email').value='guest@example.test';
+ const form=document.getElementById('booking-form');
+ return {document,calls,form,html,origin,async submit(){
+  if(!form.checkValidity())return false;
+  const submitter=form.querySelector('button[type="submit"]');
+  for(const fn of form.listeners.submit||[])await fn({preventDefault(){},submitter,target:form});return true;
+ }};
+}
+const publicTypeChoices=[{id:'personal',label:'Personal'},{id:'team1',label:'Team1'}];
+function typeRadios(f){return f.form.querySelectorAll('input[type="radio"]');}
+function assertTypeGroup(f) {
+ const radios=typeRadios(f);assert.equal(radios.length,2,'configured frontend must render both booking-type radios');
+ assert.deepEqual(radios.map(r=>r.value),['personal','team1']);assert.ok(radios.every(r=>r.name&&r.name===radios[0].name));
+ const group=radios[0].closest('fieldset')||radios[0].closest('[role="radiogroup"]');assert.ok(group,'radio choices have a semantic group');
+ const legend=group.querySelector('legend'),labelled=group.getAttribute('aria-labelledby');
+ const label=legend?.textContent||group.getAttribute('aria-label')||(labelled&&f.document.getElementById(labelled)?.textContent);
+ assert.equal(label?.trim(),'What is this for?');
+ for(const [n,radio] of radios.entries()) {
+  const label=radio.closest('label')||f.document.querySelector(`label[for="${radio.id}"]`);
+  assert.ok(label?.textContent.includes(publicTypeChoices[n].label),'each radio has its visible accessible label');
+ }
+ return radios;
+}
+test('booking types frontend: configured choices are accessible, required and initially unselected',async t=>{
+ const f=await bookingTypeFrontend(t,publicTypeChoices),radios=assertTypeGroup(f);
+ assert.ok(radios.every(r=>!r.checked),'two choices require an explicit guest selection');
+ assert.ok(radios.some(r=>r.required),'the native radio group is required');
+ assert.equal(await f.submit(),false);assert.ok(!f.calls.some(c=>c.path==='/api/book'));
+});
+test('booking types frontend: choosing a radio posts its id and shows its label on confirmation',async t=>{
+ const f=await bookingTypeFrontend(t,publicTypeChoices),radios=assertTypeGroup(f);radios[1].click();
+ assert.equal(await f.submit(),true);assert.equal(f.calls.find(c=>c.path==='/api/book')?.body.bookingType,'team1');
+ assert.match(f.document.getElementById('success-step').textContent,/Team1/);
+});
+test('booking types frontend: an unconfigured form has no choice and preserves its legacy payload',async t=>{
+ const f=await bookingTypeFrontend(t);assert.equal(typeRadios(f).length,0);
+ assert.doesNotMatch(f.form.textContent,/What is this for\?/);
+ assert.equal(await f.submit(),true);const call=f.calls.find(c=>c.path==='/api/book');assert.ok(call);assert.ok(!('bookingType' in call.body));
+});
+test('booking types frontend: a single configured type renders one required choice',async t=>{
+ const f=await bookingTypeFrontend(t,publicTypeChoices.slice(0,1)),radios=typeRadios(f);
+ assert.equal(radios.length,1);assert.equal(radios[0].value,'personal');assert.ok(radios[0].required);
+ radios[0].click();assert.equal(await f.submit(),true);assert.equal(f.calls.find(c=>c.path==='/api/book')?.body.bookingType,'personal');
+});
+test('booking types frontend: binary-served asset digests match every referring override page',async t=>{
+ const f=await bookingTypeFrontend(t);
+ for(const page of ['/','/privacy','/manage']) {
+  const r=await fetch(f.origin+page);assert.equal(r.status,200);const html=await r.text();
+  const refs=[...html.matchAll(/(?:src|href)="(\/assets\/(?:public\.js|app\.css)\?v=([^"&]+))"/g)];assert.ok(refs.length);
+  for(const [,path,digest] of refs) {
+   const asset=await fetch(f.origin+path);assert.equal(asset.status,200);const bytes=Buffer.from(await asset.arrayBuffer());
+   assert.equal(digest,createHash('sha256').update(bytes).digest('hex').slice(0,16));
+   assert.equal(asset.headers.get('etag'),'"'+createHash('sha256').update(bytes).digest('hex')+'"');
+  }
+ }
+});

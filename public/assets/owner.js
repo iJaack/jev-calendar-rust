@@ -231,7 +231,23 @@ async function connectAccount(accountId) {
   const result = await accountRequest('/api/google/connect', 'POST', { accountId });
   window.location.assign(result.url);
 }
-function renderAccounts({ accounts, demo }) {
+function renderAccounts({ accounts, demo, bookingTypes, bookingTypesEnabled }) {
+  // Account mutations omit configuration, so retain the previous listing then.
+  if (bookingTypes !== undefined) {
+    $('booking-types-state').textContent = !bookingTypes?.length ? 'No valid booking types configured. New bookings use the selected account’s primary calendar.' : bookingTypesEnabled ? 'Configured destinations for new bookings.' : 'Booking types are disabled. New bookings use the selected account’s primary calendar.';
+    $('booking-types-list').replaceChildren();
+    for (const type of bookingTypes || []) {
+      const row = document.createElement('li');
+      row.dataset.account = type.accountId;
+      row.dataset.description = `${type.label} (${type.id}) · ${type.accountId} · ${type.calendarId}${type.default ? ' · Default' : ''}`;
+      $('booking-types-list').append(row);
+    }
+  }
+  for (const row of $('booking-types-list').children) {
+    const connected = accounts.some(account => account.id === row.dataset.account);
+    row.textContent = row.dataset.description + (connected ? '' : ' · Account not connected');
+    row.classList.toggle('error', !connected);
+  }
   const list = $('google-accounts'); list.replaceChildren(); list.setAttribute('aria-busy', 'false');
   $('google-connect').textContent = accounts.length ? 'Connect another account' : 'Connect Google account';
   $('google-connect').disabled = demo;

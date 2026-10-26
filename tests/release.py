@@ -194,5 +194,176 @@ class Recovery(unittest.TestCase):
                     self.assertEqual(release.plistlib.loads((agents / f'{label}.plist').read_bytes()), original[label])
                 self.assertIn(('readback', True), events)
                 self.assertEqual(events[-1], ('readback', previous_rust))
+# Spec Tests: Config validation (valid list, every invalid rule, exactly one
+# default, unknown keys) and --set/--show CLI. Built binary + disposable DB only.
+BOOKING_TYPES = [
+    dict(id='personal', label='Personal', accountId='owner@example.test', calendarId='personal-work@group.example.test', default=True),
+    dict(id='team1', label='Team1', accountId='team@team.example.test', calendarId='team-work@group.example.test', default=False),
+]
+
+def changed_type(**fields):
+    return [dict(BOOKING_TYPES[0], **fields), dict(BOOKING_TYPES[1])]
+
+INVALID_BOOKING_TYPES = {
+    'not_array': {}, 'null_list': None, 'empty_list': [],
+    'too_many_entries': [dict(BOOKING_TYPES[0], id=f'type-{n}', default=n == 0) for n in range(11)],
+    'non_object_entry': [BOOKING_TYPES[0], None],
+    'empty_id': changed_type(id=''), 'long_id': changed_type(id='a' * 33),
+    'uppercase_id': changed_type(id='Personal'), 'underscore_id': changed_type(id='a_b'),
+    'leading_hyphen_id': changed_type(id='-personal'), 'unicode_id': changed_type(id='café'),
+    'newline_id': changed_type(id='personal\n'), 'numeric_id': changed_type(id=5),
+    'duplicate_id': changed_type(id='team1'),
+    'empty_label': changed_type(label=''), 'long_label': changed_type(label='x' * 41),
+    'newline_label': changed_type(label='Personal\nCalendar'), 'carriage_return_label': changed_type(label='Personal\rCalendar'),
+    'numeric_label': changed_type(label=4),
+    'empty_account': changed_type(accountId=''), 'null_account': changed_type(accountId=None),
+    'numeric_account': changed_type(accountId=3),
+    'empty_calendar': changed_type(calendarId=''), 'null_calendar': changed_type(calendarId=None),
+    'numeric_calendar': changed_type(calendarId=3),
+    'no_default': changed_type(default=False), 'string_default': changed_type(default='true'),
+    'two_defaults': [BOOKING_TYPES[0], dict(BOOKING_TYPES[1], default=True)],
+    'unknown_key': changed_type(unexpected='synthetic'),
+}
+for field in ['id', 'label', 'accountId', 'calendarId', 'default']:
+    INVALID_BOOKING_TYPES['missing_' + field] = [{k: v for k, v in BOOKING_TYPES[0].items() if k != field}, dict(BOOKING_TYPES[1])]
+
+class BookingTypeCLI(unittest.TestCase):
+    def setUp(self):
+        self.directory = tempfile.TemporaryDirectory(prefix='jev-booking-types-cli-')
+        self.addCleanup(self.directory.cleanup)
+        self.home = pathlib.Path(self.directory.name)
+        self.path = self.home / 'state.sqlite'
+        self.env = dict(PATH=os.environ['PATH'], DATABASE_PATH=str(self.path),
+                        APP_ENCRYPTION_KEY='synthetic-booking-type-key', DEMO_MODE='true', PORT='0')
+        result = self.run_binary('--backup', str(self.home / 'initial.sqlite'))
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def run_binary(self, *args):
+        return subprocess.run([str(ROOT / 'target/release/jev-calendar'), *args], cwd=self.home,
+                              env=self.env, capture_output=True, text=True, timeout=10)
+
+    def write_list(self, value):
+        config = self.home / 'types.json'
+        config.write_text(json.dumps(value))
+        return self.run_binary('--set-booking-types', str(config))
+
+    def stored(self):
+        with sqlite3.connect(self.path) as db:
+            row = db.execute("SELECT value FROM settings WHERE key='bookingTypes'").fetchone()
+        return json.loads(row[0]) if row else None
+
+    def check_valid(self, value):
+        result = self.write_list(value)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.stored(), value)
+        for entry in value:
+            self.assertIn(entry['id'], result.stdout)
+            self.assertIn(entry['label'], result.stdout)
+            self.assertNotIn(entry['accountId'], result.stdout)
+            self.assertNotIn(entry['calendarId'], result.stdout)
+        shown = self.run_binary('--show-booking-types')
+        self.assertEqual(shown.returncode, 0, shown.stderr)
+        self.assertEqual(json.loads(shown.stdout), value)
+
+    def test_show_existing_list(self):
+        with sqlite3.connect(self.path) as db:
+            db.execute("INSERT OR REPLACE INTO settings VALUES ('bookingTypes', ?)", (json.dumps(BOOKING_TYPES),))
+        shown = self.run_binary('--show-booking-types')
+        self.assertEqual(shown.returncode, 0, shown.stderr)
+        self.assertEqual(json.loads(shown.stdout), BOOKING_TYPES)
+
+    def check_invalid(self, value):
+        # Seed directly so today's missing CLI cannot masquerade as validation.
+        with sqlite3.connect(self.path) as db:
+            db.execute("INSERT OR REPLACE INTO settings VALUES ('bookingTypes', ?)", (json.dumps(BOOKING_TYPES),))
+        result = self.write_list(value)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertRegex(result.stderr + result.stdout, r'(?i)booking[ _-]*types?.*(invalid|required|must|unique|default|unknown|array|empty|entry|entries|label|id|key|limit|reject)|(?i:invalid|required|unknown).*booking[ _-]*types?')
+        self.assertEqual(self.stored(), BOOKING_TYPES, 'invalid lists must not partially replace the setting')
+
+    def test_malformed_json_rejected_atomically(self):
+        config = self.home / 'broken.json'
+        config.write_text('[{"id":')
+        result = self.run_binary('--set-booking-types', str(config))
+        self.assertNotEqual(result.returncode, 0)
+        self.assertRegex(result.stderr, r'(?i)json|parse|booking[ _-]*types?')
+        self.assertIsNone(self.stored())
+
+VALID_BOOKING_TYPES = {
+    'standard': BOOKING_TYPES,
+    'boundaries_and_primary': [dict(BOOKING_TYPES[0], id='a' * 32, label='é' * 40, calendarId='primary')],
+    'maximum_and_last_default': [dict(BOOKING_TYPES[0], id=f'type-{n}', default=n == 9) for n in range(10)],
+    'optional_false': [dict(BOOKING_TYPES[0]), {k: v for k, v in BOOKING_TYPES[1].items() if k != 'default'}],
+}
+for case, value in VALID_BOOKING_TYPES.items():
+    def valid_case(self, value=value):
+        self.check_valid(value)
+    setattr(BookingTypeCLI, 'test_accept_' + case, valid_case)
+
+for case, value in INVALID_BOOKING_TYPES.items():
+    def invalid_case(self, value=value):
+        self.check_invalid(value)
+    setattr(BookingTypeCLI, 'test_reject_' + case, invalid_case)
+
+# Spec Tests: Migration opens an old schema, adds nullable booking_type/calendar_id
+# idempotently, and preserves rows/values. Backup and restore retain both schemas.
+class BookingTypeMigration(unittest.TestCase):
+    def test_old_schema_migrates_idempotently_preserving_values_and_backups(self):
+        with tempfile.TemporaryDirectory(prefix='jev-booking-types-migration-') as directory:
+            home = pathlib.Path(directory)
+            path = home / 'old.sqlite'
+            original = ('synthetic-old-row', '2030-10-07T12:00:00Z', '2030-10-07T12:30:00Z', 10,
+                        'Synthetic Guest', 'guest@example.test', 'confirmed', 'synthetic-event', '2026-10-01T12:00:00Z')
+            with sqlite3.connect(path) as db:
+                db.execute('CREATE TABLE bookings (idempotency_key TEXT PRIMARY KEY,start TEXT NOT NULL,end TEXT NOT NULL,buffer_minutes INTEGER NOT NULL,guest_name TEXT,guest_email TEXT,status TEXT NOT NULL,event_id TEXT,created_at TEXT NOT NULL)')
+                db.execute('INSERT INTO bookings VALUES (?,?,?,?,?,?,?,?,?)', original)
+                self.assertNotIn('booking_type', [r[1] for r in db.execute('PRAGMA table_info(bookings)')])
+            env = dict(PATH=os.environ['PATH'], DATABASE_PATH=str(path), APP_ENCRYPTION_KEY='synthetic-migration-key', DEMO_MODE='true', PORT='0')
+            for n in range(2):
+                backup = home / f'backup-{n}.sqlite'
+                result = subprocess.run([str(ROOT / 'target/release/jev-calendar'), '--backup', str(backup)], cwd=home, env=env, capture_output=True, text=True, timeout=10)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                for current in [path, backup]:
+                    with sqlite3.connect(current) as db:
+                        columns = {r[1]: r for r in db.execute('PRAGMA table_info(bookings)')}
+                        for name in ['booking_type', 'calendar_id']:
+                            self.assertIn(name, columns, 'startup migration must add booking-type columns')
+                            self.assertEqual(columns[name][2].upper(), 'TEXT')
+                            self.assertEqual(columns[name][3], 0, 'column must be nullable')
+                            self.assertIsNone(columns[name][4])
+                        row = db.execute('SELECT idempotency_key,start,end,buffer_minutes,guest_name,guest_email,status,event_id,created_at,booking_type,calendar_id FROM bookings').fetchone()
+                        self.assertEqual(row, original + (None, None))
+                    self.assertEqual(release.safe(current)['bookings']['confirmed'], 1)
+            restored = home / 'restored.sqlite'
+            with sqlite3.connect(backup) as source, sqlite3.connect(restored) as target:
+                source.backup(target)
+            with sqlite3.connect(restored) as db:
+                self.assertEqual(db.execute('SELECT booking_type,calendar_id FROM bookings').fetchall(), [(None, None)])
+
+    def test_backup_restore_retains_existing_typed_destination_values(self):
+        # Spec Tests: Backup/restore safety also works with the added columns.
+        with tempfile.TemporaryDirectory(prefix='jev-booking-types-backup-') as directory:
+            home = pathlib.Path(directory)
+            path, backup, restored = [home / name for name in ['state.sqlite', 'backup.sqlite', 'restored.sqlite']]
+            env = dict(PATH=os.environ['PATH'], DATABASE_PATH=str(path), APP_ENCRYPTION_KEY='synthetic-backup-key', DEMO_MODE='true', PORT='0')
+            binary = str(ROOT / 'target/release/jev-calendar')
+            initial = subprocess.run([binary, '--backup', str(home / 'empty.sqlite')], cwd=home, env=env, capture_output=True, text=True, timeout=10)
+            self.assertEqual(initial.returncode, 0, initial.stderr)
+            with sqlite3.connect(path) as db:
+                columns = {r[1] for r in db.execute('PRAGMA table_info(bookings)')}
+                # Seed a post-feature schema independently of migration coverage.
+                for name in ['booking_type', 'calendar_id']:
+                    if name not in columns:
+                        db.execute(f'ALTER TABLE bookings ADD COLUMN {name} TEXT')
+                db.execute("INSERT INTO bookings (idempotency_key,start,end,buffer_minutes,status,created_at,google_account_id,booking_type,calendar_id) VALUES ('synthetic-typed-backup','2030-10-07T12:00:00Z','2030-10-07T12:30:00Z',10,'confirmed','2026-10-01T12:00:00Z','team@team.example.test','team1','team-work@group.example.test')")
+            result = subprocess.run([binary, '--backup', str(backup)], cwd=home, env=env, capture_output=True, text=True, timeout=10)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            with sqlite3.connect(backup) as source, sqlite3.connect(restored) as target:
+                source.backup(target)
+            for current in [path, backup, restored]:
+                with sqlite3.connect(current) as db:
+                    self.assertEqual(db.execute('SELECT booking_type,calendar_id,google_account_id FROM bookings').fetchall(), [('team1', 'team-work@group.example.test', 'team@team.example.test')])
+                self.assertEqual(release.safe(current)['bookings']['confirmed'], 1)
+
 if __name__ == '__main__':
     unittest.main()
