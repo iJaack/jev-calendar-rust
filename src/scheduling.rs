@@ -90,13 +90,23 @@ pub fn candidates(v: &Value) -> Result<Vec<Value>> {
     } else {
         "UTC".into()
     };
+    if (number(v, "durationMinutes") * 60_000.0) as i64 <= 0 {
+        return Ok(vec![]);
+    }
+    let start = zoned(&day, number(&v["hours"], "start"), &zone)?;
+    let end = zoned(&day, number(&v["hours"], "end"), &zone)?;
+    Ok(window_candidates(v, start, end))
+}
+
+// Shared UTC window generator: travel can clip local workdays at exact flight
+// instants without converting them back into fractional local wall-clock hours.
+pub(crate) fn window_candidates(v: &Value, start: i64, end: i64) -> Vec<Value> {
     let duration = (number(v, "durationMinutes") * 60_000.0) as i64;
     let buffer = (number(v, "bufferMinutes").max(0.0) * 60_000.0) as i64;
     if duration <= 0 {
-        return Ok(vec![]);
+        return vec![];
     }
-    let mut cursor = zoned(&day, number(&v["hours"], "start"), &zone)?;
-    let end = zoned(&day, number(&v["hours"], "end"), &zone)?;
+    let mut cursor = start;
     let cutoff = v["notBefore"].as_i64().unwrap_or(i64::MIN);
     let limit = v["limit"].as_u64().unwrap_or(12) as usize;
     let mut intervals: Vec<_> = array(&v["busy"])
@@ -117,7 +127,7 @@ pub fn candidates(v: &Value) -> Result<Vec<Value>> {
         }
         cursor = cursor.max(b.saturating_add(buffer));
     }
-    Ok(out)
+    out
 }
 pub fn bucket(start: &str, z: &str) -> Result<String> {
     let zone: Tz = z.parse()?;

@@ -57,6 +57,18 @@ Current browser overrides live in `public/`; the immutable Node oracle remains i
 - `evidence/`: retained build/check/test logs, synthetic comparison results, screenshots and local benchmark.
 - `dist/`: packaged binary and checksummed frontend assets. Release identity is recorded in `evidence/release-path.txt`.
 
+## Travel time zones
+
+TripIt calendars (case-insensitive name match) infer the host's location per date from timed flight titles such as `XX100 FCO to CUN`. An embedded table of over 150 airports maps airports and hotel cities to IANA zones without network lookups. The configured hours and weekdays apply in each inferred zone; responses label it `hostTimezoneSource: "travel"`. Unknown airports supply no location, while flight conflicts still block availability. Demo mode has no events and is unchanged.
+
+On travel days, origin hours end before departure minus the configured buffer, and destination hours begin after final landing plus the buffer. Overnight, multi-leg and date-line journeys block every instant in transit, including layovers under 24 hours at the connecting airport. A matching hotel check-in makes a connection an actual stay; paired check-in/check-out markers identify the stay's zone by airport/city, or the last arrival when the address is unrecognized. Conflicting hotels, overlapping flights and disconnected itineraries use the normal fallback timezone for the ambiguous date while retaining transit blocks. All conversions use the date-specific IANA DST rules. The first flight's origin applies only on its departure date; a final destination persists for at most 30 elapsed days after arrival, then falls back.
+
+A single host date can have both origin and destination windows; its primary zone is the first ground segment with working hours (otherwise the last ground zone touching that date). For a viewer date spanning host dates with different zones, response metadata uses the host date contributing the most **returned** slots after workload ranking and the response limit. Ties, or no slots, use the first overlapping host date, including closed weekend dates. Slot ownership stays with the host date that generated it.
+
+The shared preview and fresh confirmation paths read events from 30 days before the ordinary fetch start (which already includes weekly context), preserving prior arrivals without widening free/busy history. Fresh reads also include up to two adjacent viewer days for zone/date-line boundaries; month scans retain the event history. Free/busy still uses requests of at most 30 days. Booking creation and changes call fresh availability and inherit the same windows and blocks.
+
+`JEV_TRAVEL_TIMEZONES` defaults to on. Set it to `off`, `0` or `false` (case-insensitive) and restart through the existing authorized deployment process to roll back to the previous timezone/slot path. With no relevant TripIt data, existing response JSON and timezone sources are preserved. This switch needs no database migration; ordinary release rollback remains available.
+
 ## Build and validate
 
 Rust 1.93.1 is pinned. Cargo.lock records the exact resolved dependencies. Keep compilation to two jobs on the shared Mac. Python 3.12 or later restores the captured Node test oracle on a fresh checkout and rejects modified reference files. Build outputs, release packages, credentials, SQLite databases and private backups are excluded from Git; retained raw evidence stays local.

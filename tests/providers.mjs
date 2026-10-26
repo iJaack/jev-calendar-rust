@@ -12,27 +12,27 @@ import { GOOGLE_SCOPES } from '../reference/lib/google-accounts.js';
 const root=new URL('..',import.meta.url).pathname;
 const binary=new URL('../target/debug/jev-calendar',import.meta.url).pathname;
 async function port(){const s=createServer().listen(0,'127.0.0.1');await once(s,'listening');const p=s.address().port;await new Promise(r=>s.close(r));return p;}
-async function fixture(t,{travel=false,travelDates=['2030-10-07'],learningAgeMs=0,jevLow=false,calendarRefreshMs=60_000,previewMaxAgeMs=120_000}={}){
+async function fixture(t,{travel=false,travelDates=['2030-10-07'],learningAgeMs=0,jevLow=false,calendarRefreshMs=60_000,previewMaxAgeMs=120_000,tripitEvents=null,travelFlag='',tripitName='Synthetic (TripIt)'}={}){
  const dir=mkdtempSync(join(tmpdir(),'jev-rust-provider-')),path=join(dir,'fixture.sqlite'),store=new SqliteStore({path,encryptionSecret:'synthetic-key'});
  const token={access_token:'owner-token',refresh_token:'synthetic-refresh',scope:GOOGLE_SCOPES,expires_at:Date.now()+3600_000};store.connectGoogle('owner@example.test',token);const session=store.newSession();
  store.putSetting('settings',{timezone:'Europe/Rome',hours:{start:9,end:18},baseLocation:travel?'Synthetic Base Street 1':'',minimumBookingNoticeMinutes:0,minimumTravelBufferMinutes:10});
  store.putSetting('projectRules',[]);
  store.putSetting('workloadLearning',{signature:JSON.stringify(['week-intelligence-v1',{start:9,end:18},0,[],'Europe/Rome']),updatedAt:new Date(Date.now()-learningAgeMs).toISOString(),bookingNotice:{source:'fallback',minutes:0},baselineBusyMinutes:135,typicalProjectMinutes:{}});
- const state={jevLow,calls:[],events:new Map(),creationCount:0,updateCount:0,loseCreate:false,loseGet:false,loseCancel:false,missingCalendar:false,newCalendar:false,routeLimit:false,refreshGate:null};
+ const state={jevLow,tripitEvents,calls:[],events:new Map(),creationCount:0,updateCount:0,loseCreate:false,loseGet:false,loseCancel:false,missingCalendar:false,newCalendar:false,routeLimit:false,refreshGate:null};
  const provider=createServer(async(req,res)=>{const url=new URL(req.url,'http://fixture.test');let raw='';for await(const chunk of req)raw+=chunk;const body=raw&&req.headers['content-type']?.includes('json')?JSON.parse(raw):{};const bearer=req.headers.authorization||'';state.calls.push({path:url.pathname,query:url.search,method:req.method,body,bearer,etag:req.headers['if-match']});const send=(code,value)=>{res.writeHead(code,{'Content-Type':'application/json'});res.end(JSON.stringify(value));};
   if(url.pathname==='/oauth/token'){if(state.refreshGate)await state.refreshGate;const form=new URLSearchParams(raw);const identity=form.get('code')==='wrong-owner'?'other':'owner';return send(200,{access_token:identity+'-token',refresh_token:'synthetic-refresh',scope:GOOGLE_SCOPES,expires_in:3600});}
   if(url.pathname==='/calendar/v3/users/me/settings/timezone')return send(200,{value:'Europe/Rome'});
-  if(url.pathname==='/calendar/v3/users/me/calendarList'){const identity=bearer==='Bearer other-token'?'other':'owner';const calendars=[{id:identity+'@example.test',primary:true,accessRole:'owner',summary:'Synthetic primary'},...Array.from({length:52},(_,n)=>({id:'shared-'+n,hidden:n===0,selected:false,accessRole:n===1?'freeBusyReader':'reader',summary:'Synthetic '+n}))];if(state.subscription)calendars.push({id:'synthetic@group.v.calendar.google.com',accessRole:state.subscriptionRole||'reader',timeZone:'Pacific/Honolulu'});if(state.newCalendar)calendars.push({id:'new-hidden',hidden:true,accessRole:'freeBusyReader'});return send(200,{items:url.searchParams.has('pageToken')?calendars.slice(30):calendars.slice(0,30),...(!url.searchParams.has('pageToken')?{nextPageToken:'page-two'}:{})});}
-  if(url.pathname==='/calendar/v3/freeBusy'){if(Date.parse(body.timeMax)-Date.parse(body.timeMin)>35*86400_000)return send(400,{error:{reason:'timeRangeTooLong'}});const calendars={};for(const item of body.items){if(state.missingCalendar&&item.id==='shared-0')continue;if(item.id==='synthetic@group.v.calendar.google.com'){calendars[item.id]={errors:[{domain:'global',reason:state.subscriptionError||'notFound'}],busy:[]};continue;}calendars[item.id]={busy:[...(item.id==='shared-0'?[{start:'2030-10-07T07:00:00.000Z',end:'2030-10-07T08:00:00.000Z'},...(state.extraBusy?[state.extraBusy]:[])]:[]),...(travel&&item.id==='shared-2'?travelDates.map(date=>({start:date+'T10:00:00.000Z',end:date+'T11:00:00.000Z'})):[])]};}return send(200,{calendars});}
+  if(url.pathname==='/calendar/v3/users/me/calendarList'){const identity=bearer==='Bearer other-token'?'other':'owner';const calendars=[{id:identity+'@example.test',primary:true,accessRole:'owner',summary:'Synthetic primary'},...Array.from({length:52},(_,n)=>({id:'shared-'+n,hidden:n===0,selected:false,accessRole:n===1?'freeBusyReader':'reader',summary:'Synthetic '+n}))];if(state.tripitEvents)calendars.push({id:'synthetic-travel-calendar',summary:tripitName,accessRole:'reader',timeZone:'UTC'});if(state.subscription)calendars.push({id:'synthetic@group.v.calendar.google.com',accessRole:state.subscriptionRole||'reader',timeZone:'Pacific/Honolulu'});if(state.newCalendar)calendars.push({id:'new-hidden',hidden:true,accessRole:'freeBusyReader'});return send(200,{items:url.searchParams.has('pageToken')?calendars.slice(30):calendars.slice(0,30),...(!url.searchParams.has('pageToken')?{nextPageToken:'page-two'}:{})});}
+  if(url.pathname==='/calendar/v3/freeBusy'){if(Date.parse(body.timeMax)-Date.parse(body.timeMin)>35*86400_000)return send(400,{error:{reason:'timeRangeTooLong'}});const calendars={};for(const item of body.items){if(state.missingCalendar&&item.id==='shared-0')continue;if(item.id==='synthetic@group.v.calendar.google.com'){calendars[item.id]={errors:[{domain:'global',reason:state.subscriptionError||'notFound'}],busy:[]};continue;}calendars[item.id]={busy:[...(item.id==='synthetic-travel-calendar'&&!state.omitTripitBusy?(state.tripitEvents||[]).map(e=>({start:e.start.dateTime,end:e.end.dateTime})):[]),...(item.id==='shared-0'?[{start:'2030-10-07T07:00:00.000Z',end:'2030-10-07T08:00:00.000Z'},...(state.extraBusy?[state.extraBusy]:[])]:[]),...(travel&&item.id==='shared-2'?travelDates.map(date=>({start:date+'T10:00:00.000Z',end:date+'T11:00:00.000Z'})):[])]};}return send(200,{calendars});}
   if(url.pathname==='/calendar/v3/calendars/primary/events'&&req.method==='POST'){if(state.createGate)await state.createGate;state.creationCount++;assert.match(body.id,/^[0-9a-v]{5,1024}$/);if(state.events.has(body.id))return send(409,{error:'duplicate'});const event={...body,id:body.id,etag:'revision-0',hangoutLink:'https://meet.google.com/synthetic'};state.events.set(body.id,event);if(state.loseCreate){state.loseCreate=false;state.loseGet=true;req.socket.destroy();return;}return send(200,event);}
   if(url.pathname.startsWith('/calendar/v3/calendars/primary/events/')){const id=decodeURIComponent(url.pathname.split('/').at(-1)),event=state.events.get(id);if(req.method==='GET'){if(state.loseGet){state.loseGet=false;return send(503,{error:'readback unavailable'});}return event?send(200,event):send(404,{});}if(!event)return send(404,{});if(req.headers['if-match']!==event.etag)return send(412,{});state.updateCount++;if(req.method==='DELETE'){state.events.set(id,{id,status:'cancelled'});if(state.loseCancel){state.loseCancel=false;req.socket.destroy();return;}return send(204,null);}const moved={...event,...body,etag:'revision-'+state.updateCount};state.events.set(id,moved);return send(200,moved);}
-  if(/\/calendar\/v3\/calendars\/.+\/events$/.test(url.pathname)){const id=decodeURIComponent(url.pathname.split('/').at(-2));if(id==='synthetic@group.v.calendar.google.com'){if(state.subscriptionFailure)return send(503,{});if(state.subscriptionMalformed)return send(200,{timeZone:'Pacific/Honolulu',items:[{start:{date:'invalid'},end:{date:'2030-10-09'}}]});const page=url.searchParams.has('pageToken');return send(200,{timeZone:'Pacific/Honolulu',items:page?[{start:{date:'2030-10-08'},end:{date:'2030-10-09'}}]:[{start:{dateTime:'2030-10-07T09:00:00Z'},end:{dateTime:'2030-10-07T10:00:00Z'}},...['transparent','cancelled','declined'].map(kind=>({start:{dateTime:'2030-10-07T10:00:00Z'},end:{dateTime:'2030-10-07T18:00:00Z'},...(kind==='transparent'?{transparency:kind}:kind==='cancelled'?{status:kind}:{attendees:[{self:true,responseStatus:kind}]})}))],...(!page?{nextPageToken:'events-two'}:{})});}return send(200,{items:travel&&id==='shared-2'?travelDates.map(date=>({start:{dateTime:date+'T10:00:00.000Z'},end:{dateTime:date+'T11:00:00.000Z'},location:'Synthetic Event Street 2',summary:'Team1 [meeting]',status:'confirmed'})):[]});}
+  if(/\/calendar\/v3\/calendars\/.+\/events$/.test(url.pathname)){const id=decodeURIComponent(url.pathname.split('/').at(-2));if(id==='synthetic-travel-calendar')return send(200,{items:(state.tripitEvents||[]).filter(e=>Date.parse(e.end.dateTime)>Date.parse(url.searchParams.get('timeMin'))&&Date.parse(e.start.dateTime)<Date.parse(url.searchParams.get('timeMax')))});if(id==='synthetic@group.v.calendar.google.com'){if(state.subscriptionFailure)return send(503,{});if(state.subscriptionMalformed)return send(200,{timeZone:'Pacific/Honolulu',items:[{start:{date:'invalid'},end:{date:'2030-10-09'}}]});const page=url.searchParams.has('pageToken');return send(200,{timeZone:'Pacific/Honolulu',items:page?[{start:{date:'2030-10-08'},end:{date:'2030-10-09'}}]:[{start:{dateTime:'2030-10-07T09:00:00Z'},end:{dateTime:'2030-10-07T10:00:00Z'}},...['transparent','cancelled','declined'].map(kind=>({start:{dateTime:'2030-10-07T10:00:00Z'},end:{dateTime:'2030-10-07T18:00:00Z'},...(kind==='transparent'?{transparency:kind}:kind==='cancelled'?{status:kind}:{attendees:[{self:true,responseStatus:kind}]})}))],...(!page?{nextPageToken:'events-two'}:{})});}return send(200,{items:travel&&id==='shared-2'?travelDates.map(date=>({start:{dateTime:date+'T10:00:00.000Z'},end:{dateTime:date+'T11:00:00.000Z'},location:'Synthetic Event Street 2',summary:'Team1 [meeting]',status:'confirmed'})):[]});}
   if(url.pathname==='/routes'){if(state.routeLimit||(state.routeWalkFail&&body.travelMode==='WALK'))return send(429,{});if(state.routeReply)return send(200,state.routeReply(body));return send(200,{routes:[{duration:body.travelMode==='WALK'?'300s':'600s',distanceMeters:1000}]});}
   if(url.pathname==='/jev'){const answers={};for(const[key,q]of Object.entries(body.questions)){const choices=Object.keys(q.criteria),choice=key==='travel_mode'?'WALK':key==='extra_buffer'?'MIN_5':key==='booking_notice'?'BASE':'cluster_meetings';answers[key]={type:'choice',choice,confidence:state.jevLow?.2:.9,probabilities:Object.fromEntries(choices.map(c=>[c,c===choice?1:0]))};}return send(200,{model:'jev-1.13.0',answers});}
   if(url.pathname==='/photon')return send(200,{features:[{properties:{osm_type:'N',osm_id:42,street:'Synthetic Street',housenumber:'1',city:'Rome',country:'Italy'},geometry:{coordinates:[12.5,41.9]}}]});
   return send(404,{});
  }).listen(0,'127.0.0.1');await once(provider,'listening');const providerOrigin=`http://127.0.0.1:${provider.address().port}`;const p=await port(),origin=`http://127.0.0.1:${p}`;
- const processOptions={cwd:root+'reference',env:{PATH:process.env.PATH,PORT:String(p),DATABASE_PATH:path,APP_ENCRYPTION_KEY:'synthetic-key',DEMO_MODE:'false',APP_BASE_URL:origin,GOOGLE_CLIENT_ID:'synthetic-client',GOOGLE_CLIENT_SECRET:'synthetic-secret',GOOGLE_ROUTES_API_KEY:'synthetic-routes',TYPESAFE_API_KEY:'synthetic-jev',JEV_TEST_MODE:'true',JEV_TEST_CALENDAR_REFRESH_MS:String(calendarRefreshMs),JEV_TEST_PREVIEW_MAX_AGE_MS:String(previewMaxAgeMs),JEV_TEST_PROVIDER_ORIGIN:providerOrigin},stdio:['ignore','pipe','pipe']};let child=spawn(binary,['--private'],processOptions);let logs='';child.stderr.on('data',d=>logs+=d);await Promise.race([once(child.stdout,'data'),once(child,'exit').then(()=>{throw Error('Failed startup: '+logs)})]);
+ const processOptions={cwd:root+'reference',env:{PATH:process.env.PATH,PORT:String(p),DATABASE_PATH:path,APP_ENCRYPTION_KEY:'synthetic-key',DEMO_MODE:'false',APP_BASE_URL:origin,GOOGLE_CLIENT_ID:'synthetic-client',GOOGLE_CLIENT_SECRET:'synthetic-secret',GOOGLE_ROUTES_API_KEY:'synthetic-routes',TYPESAFE_API_KEY:'synthetic-jev',JEV_TEST_MODE:'true',JEV_TRAVEL_TIMEZONES:travelFlag,JEV_TEST_CALENDAR_REFRESH_MS:String(calendarRefreshMs),JEV_TEST_PREVIEW_MAX_AGE_MS:String(previewMaxAgeMs),JEV_TEST_PROVIDER_ORIGIN:providerOrigin},stdio:['ignore','pipe','pipe']};let child=spawn(binary,['--private'],processOptions);let logs='';child.stderr.on('data',d=>logs+=d);await Promise.race([once(child.stdout,'data'),once(child,'exit').then(()=>{throw Error('Failed startup: '+logs)})]);
  t.after(async()=>{if(child.exitCode===null){child.kill();await once(child,'exit');}provider.closeAllConnections();await new Promise(r=>provider.close(r));store.db.close();rmSync(dir,{recursive:true,force:true});});
  const api=(path,body,headers={})=>fetch(origin+path,{method:body===undefined?'GET':'POST',headers:{'Content-Type':'application/json',...headers},...(body!==undefined?{body:JSON.stringify(body)}:{}),redirect:'manual'});
  const owner={Cookie:`jev_session=${session}`,Origin:origin,'X-Jev-Owner':'1'};
@@ -181,4 +181,99 @@ test('unsupported subscription can populate a fresh background preview',async t=
  const health=await(await f.api('/health')).json();assert.equal(health.previewReady,true);
  assert.ok(f.state.calls.slice(before).some(c=>c.path.includes('synthetic%40group.v.calendar.google.com')));
  assert.equal(f.state.creationCount,0);
+});
+
+
+// Pick a Monday several years ahead, independent of the machine's current day.
+function travelMonday() {
+ const d=new Date(Date.UTC(new Date().getUTCFullYear()+4,9,1));
+ while(d.getUTCDay()!==1)d.setUTCDate(d.getUTCDate()+1);
+ return d.toISOString().slice(0,10);
+}
+function shiftTravelDate(day,n){return new Date(Date.parse(day+'T12:00:00Z')+n*86400_000).toISOString().slice(0,10);}
+function tripitFlight(summary,start,end){return{summary,location:'Synthetic terminal',start:{dateTime:start},end:{dateTime:end},status:'confirmed'};}
+function syntheticJourney(monday) {
+ const friday=shiftTravelDate(monday,4),saturday=shiftTravelDate(monday,5),tuesday=shiftTravelDate(monday,1);
+ return[
+  tripitFlight('XX100 FCO to ATL',monday+'T09:25:00Z',monday+'T20:24:00Z'),
+  tripitFlight('XX101 ATL to CUN',monday+'T22:35:00Z',tuesday+'T00:55:00Z'),
+  tripitFlight('XX102 CUN to ATL',friday+'T17:35:00Z',friday+'T20:14:00Z'),
+  tripitFlight('XX103 ATL to FCO',friday+'T21:55:00Z',saturday+'T07:15:00Z'),
+ ];
+}
+function assertCancunDay(value,day) {
+ assert.equal(value.hostTimezone,'America/Cancun');assert.equal(value.hostTimezoneSource,'travel');
+ assert.ok(value.candidates.length);
+ assert.equal(value.candidates[0].start,day+'T14:00:00.000Z','09:00 Cancun');
+ assert.ok(value.candidates.every(c=>Date.parse(c.start)>=Date.parse(day+'T14:00:00Z')&&Date.parse(c.end)<=Date.parse(day+'T23:00:00Z')));
+}
+test('TripIt Cancun hours flow through fresh availability, booking and rescheduling verification',async t=>{
+ const monday=travelMonday(),tuesday=shiftTravelDate(monday,1),wednesday=shiftTravelDate(monday,2),thursday=shiftTravelDate(monday,3);
+ const f=await fixture(t,{tripitEvents:syntheticJourney(monday)});
+ const input={date:tuesday,viewerTimeZone:'America/Cancun',durationMinutes:30};
+ let r=await f.api('/api/availability',input);assert.equal(r.status,200,await r.clone().text());
+ const slots=await r.json();assertCancunDay(slots,tuesday);
+ const body={...input,...slots.candidates[0],guestName:'Synthetic Guest',guestEmail:'guest@example.test',idempotencyKey:'synthetic-travel-booking'};
+ r=await f.api('/api/book',body);assert.equal(r.status,201,await r.clone().text());
+ const booking=(await r.json()).booking,token=new URLSearchParams(new URL(booking.managementUrl).hash.slice(1)).get('token');
+ r=await f.api('/api/booking/slots',{token,date:wednesday,viewerTimeZone:'America/Cancun'});assert.equal(r.status,200);
+ const next=await r.json();assertCancunDay(next,wednesday);
+ const view=await(await f.api('/api/booking/view',{token})).json();
+ r=await f.api('/api/booking/change',{token,action:'reschedule',revision:view.revision,date:wednesday,viewerTimeZone:'America/Cancun',...next.candidates[0]});
+ assert.equal(r.status,200,await r.clone().text());
+ const revision=(await r.json()).revision;
+ const offered=await(await f.api('/api/availability',{...input,date:thursday})).json();assertCancunDay(offered,thursday);
+ // A newly discovered journey blocks an offered slot even though its original
+ // preview and Google's deliberately stale free/busy response looked free.
+ const friday=shiftTravelDate(monday,4);
+ f.state.omitTripitBusy=true;
+ f.state.tripitEvents=[...f.state.tripitEvents.slice(0,2),
+  tripitFlight('XX104 CUN to ATL',thursday+'T13:00:00Z',thursday+'T20:00:00Z'),
+  tripitFlight('XX105 ATL to FCO',thursday+'T21:00:00Z',friday+'T07:00:00Z')];
+ const before=f.state.updateCount;
+ r=await f.api('/api/booking/change',{token,action:'reschedule',revision,date:thursday,viewerTimeZone:'America/Cancun',...offered.candidates[0]});
+ assert.equal(r.status,400,await r.clone().text());assert.equal(f.state.updateCount,before);
+ r=await f.api('/api/book',{...body,date:thursday,...offered.candidates[0],idempotencyKey:'synthetic-transit-rejection'});
+ assert.equal(r.status,400,await r.clone().text());assert.equal(f.state.creationCount,1);
+ assert.ok(f.state.calls.filter(c=>c.path.endsWith('/freeBusy')).every(c=>Date.parse(c.body.timeMax)-Date.parse(c.body.timeMin)<=30*86400_000));
+});
+test('TripIt inference reads old arrivals in fresh requests and shared month snapshots',async t=>{
+ const monday=travelMonday(),arrivalDay=shiftTravelDate(monday,-20);
+ const f=await fixture(t,{tripitEvents:[tripitFlight('XX110 FCO to CUN',arrivalDay+'T08:00:00Z',arrivalDay+'T20:00:00Z')]});
+ let r=await f.api('/api/availability',{date:monday,viewerTimeZone:'America/Cancun',durationMinutes:30});assert.equal(r.status,200);
+ assertCancunDay(await r.json(),monday);
+ const reads=f.state.calls.filter(c=>c.path.endsWith('/synthetic-travel-calendar/events'));
+ assert.ok(reads.some(c=>Date.parse(new URLSearchParams(c.query).get('timeMin'))<=Date.parse(arrivalDay+'T08:00:00Z')));
+ const today=new Date().toISOString().slice(0,10),old=shiftTravelDate(today,-20);
+ const g=await fixture(t,{tripitEvents:[tripitFlight('XX111 FCO to CUN',old+'T08:00:00Z',old+'T20:00:00Z')]});
+ let date=shiftTravelDate(today,2);while([0,6].includes(new Date(date+'T12:00:00Z').getUTCDay()))date=shiftTravelDate(date,1);
+ r=await g.api('/api/available-dates',{month:date.slice(0,7),viewerTimeZone:'America/Cancun',durationMinutes:30});assert.equal(r.status,200);
+ const month=await r.json();assertCancunDay(month.availabilityByDate[date],date);
+ const before=g.state.calls.length;
+ r=await g.api('/api/availability',{date,viewerTimeZone:'America/Cancun',durationMinutes:30});assert.equal(r.status,200);
+ assertCancunDay(await r.json(),date);assert.equal(g.state.calls.length,before,'shared snapshot retains travel history');
+});
+test('disabled travel and non-TripIt calendars preserve the complete legacy response',async t=>{
+ const monday=travelMonday(),old=shiftTravelDate(monday,-20),events=[tripitFlight('XX120 FCO to CUN',old+'T08:00:00Z',old+'T20:00:00Z')];
+ const baseline=await fixture(t),input={date:monday,viewerTimeZone:'Europe/Rome',durationMinutes:30};
+ const expected=await(await baseline.api('/api/availability',input)).json();
+ for(const travelFlag of ['off','0','false']) {
+  const f=await fixture(t,{tripitEvents:events,travelFlag});
+  assert.deepEqual(await(await f.api('/api/availability',input)).json(),expected);
+ }
+ const f=await fixture(t,{tripitEvents:events,tripitName:'Synthetic personal calendar'});
+ assert.deepEqual(await(await f.api('/api/availability',input)).json(),expected);
+});
+test('a viewer date crossing Cancun and Rome selects the host date with most returned slots',async t=>{
+ const monday=travelMonday(),wednesday=shiftTravelDate(monday,2),thursday=shiftTravelDate(monday,3);
+ const f=await fixture(t,{tripitEvents:[tripitFlight('XX130 CUN to FCO',wednesday+'T20:00:00Z',thursday+'T07:00:00Z')]});
+ const input={date:thursday,viewerTimeZone:'Pacific/Auckland',durationMinutes:30};
+ let r=await f.api('/api/availability',input);assert.equal(r.status,200);
+ const value=await r.json(),counts=[0,0];
+ for(const slot of value.candidates){counts[Date.parse(slot.start)<Date.parse(wednesday+'T20:00:00Z')?0:1]++;}
+ assert.ok(counts.every(n=>n>0),'both actual host dates must contribute');
+ assert.equal(value.hostTimezone,counts[1]>counts[0]?'Europe/Rome':'America/Cancun');assert.equal(value.hostTimezoneSource,'travel');
+ f.store.putSetting('settings',{...f.store.getSetting('settings'),hours:{start:9,end:9}});
+ r=await f.api('/api/availability',input);assert.equal(r.status,200);
+ const empty=await r.json();assert.deepEqual(empty.candidates,[]);assert.equal(empty.hostTimezone,'America/Cancun');assert.equal(empty.hostTimezoneSource,'travel');
 });
