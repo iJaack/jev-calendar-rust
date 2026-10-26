@@ -5,6 +5,8 @@ mod management;
 pub mod providers;
 pub mod scheduling;
 pub mod store;
+#[cfg(test)]
+mod travel;
 pub mod workload;
 
 use serde_json::Value;
