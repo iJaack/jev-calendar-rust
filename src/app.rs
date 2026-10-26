@@ -3,7 +3,7 @@ use crate::{
     providers::{self, Calendar, Providers},
     scheduling as s,
     store::Store,
-    text, workload as w,
+    text, travel, workload as w,
 };
 use anyhow::{Result, anyhow, ensure};
 use axum::{
@@ -193,11 +193,15 @@ impl App {
             json!({"timezone":if s::valid_zone(&zone){zone}else{"Europe/Rome".into()},"source":"settings"}),
         )
     }
+    fn travel_timezones(&self) -> bool {
+        !self.demo && travel::enabled(Some(&self.env("JEV_TRAVEL_TIMEZONES")))
+    }
     async fn calendar_data(
         &self,
         calendar: Option<&Calendar>,
         start: &str,
         end: &str,
+        travel_history: bool,
     ) -> Result<(Vec<Value>, Vec<Value>)> {
         if self.demo {
             let day = start.get(..10).unwrap_or("");
@@ -213,9 +217,16 @@ impl App {
             ));
         }
         let c = calendar.ok_or_else(|| anyhow!("Google Calendar is not connected"))?;
+        // Only event inference needs history. Free/busy keeps its existing
+        // bounded range and Providers' thirty-day request windowing.
+        let event_start = if travel_history && self.travel_timezones() {
+            iso(epoch(start).ok_or_else(|| anyhow!("Invalid calendar range"))? - 30 * 86_400_000)
+        } else {
+            start.to_owned()
+        };
         tokio::try_join!(
             self.providers.free_busy(c, start, end),
-            self.providers.events(c, start, end, true)
+            self.providers.events(c, &event_start, end, true)
         )
     }
     fn preview_max_age_ms(&self) -> u64 {
@@ -262,7 +273,9 @@ impl App {
         // Include adjacent viewer days and full weekly workload context for the 90-day horizon.
         let start = iso(s::zoned(&s::monday(&s::shift(&today, -2)?)?, 0.0, &zone)?);
         let end = iso(s::zoned(&s::shift(&today, 110)?, 0.0, &zone)?);
-        let (busy, events) = self.calendar_data(Some(&calendar), &start, &end).await?;
+        let (busy, events) = self
+            .calendar_data(Some(&calendar), &start, &end, true)
+            .await?;
         ensure!(
             fingerprint == self.preview_fingerprint()?,
             "Calendar configuration changed during refresh"
@@ -376,39 +389,119 @@ impl App {
         };
         let va = s::zoned(&date, 0.0, &viewer)?;
         let vb = s::zoned(&date, 24.0, &viewer)?;
+        let travel_on = self.travel_timezones();
         let mut days = vec![s::date(va, &zone)?, s::date(vb - 1, &zone)?];
         days.sort();
         days.dedup();
+        let context_days = days.clone();
         days.retain(|d| s::weekday(d).is_ok_and(|n| n > 0 && n < 6));
         let mut result = json!({"date":date,"durationMinutes":duration,"candidates":[],"travel":{"inPersonEventCount":0,"maximumBufferMinutes":settings["minimumTravelBufferMinutes"],"routeProvider":"none","adviceSource":"none"},"hostTimezone":zone,"hostTimezoneSource":host["source"],"viewerTimeZone":viewer,"demo":self.demo});
-        if days.is_empty() {
+        if days.is_empty() && !travel_on {
             return Ok(result);
         }
-        let start = iso(s::zoned(&days[0], 0.0, &zone)?);
-        let end = iso(s::zoned(days.last().expect("nonempty"), 24.0, &zone)?);
-        let ca = iso(s::zoned(&s::monday(&days[0])?, 0.0, &zone)?);
+        let legacy_days = if days.is_empty() {
+            &context_days
+        } else {
+            &days
+        };
+        let mut start = iso(s::zoned(&legacy_days[0], 0.0, &zone)?);
+        let mut end = iso(s::zoned(
+            legacy_days.last().expect("nonempty"),
+            24.0,
+            &zone,
+        )?);
+        let ca = iso(s::zoned(&s::monday(&legacy_days[0])?, 0.0, &zone)?);
         let cb = iso(s::zoned(
-            &s::shift(&s::monday(days.last().expect("nonempty"))?, 12)?,
+            &s::shift(&s::monday(legacy_days.last().expect("nonempty"))?, 12)?,
             0.0,
             &zone,
         )?);
-        let (context_busy, context_events) = if let Some(snapshot) = snapshot {
-            (
-                array(&snapshot["busy"])
-                    .into_iter()
-                    .filter(|v| s::overlaps(&ca, &cb, v))
-                    .collect(),
-                array(&snapshot["events"])
-                    .into_iter()
-                    .filter(|v| s::overlaps(&ca, &cb, v))
-                    .collect(),
-            )
+        // All IANA offsets fit within the viewer date +/- two civil dates.
+        // Read enough adjacent busy data even when the fallback says weekend.
+        let fetch_start = if travel_on {
+            iso(epoch(&ca).expect("calendar bound").min(va - 2 * 86_400_000))
         } else {
-            self.calendar_data(calendar, &ca, &cb).await?
+            ca.clone()
         };
+        let fetch_end = if travel_on {
+            iso(epoch(&cb).expect("calendar bound").max(vb + 2 * 86_400_000))
+        } else {
+            cb.clone()
+        };
+        let (all_busy, all_events) = if let Some(snapshot) = snapshot {
+            (array(&snapshot["busy"]), array(&snapshot["events"]))
+        } else {
+            self.calendar_data(calendar, &fetch_start, &fetch_end, true)
+                .await?
+        };
+        let mut plans = vec![];
+        if travel_on {
+            for offset in -2..=2 {
+                let day = s::shift(&date, offset)?;
+                let plan = travel::infer_day_plan(
+                    &json!({"day":day,"zone":zone,"source":host["source"],"hours":settings["hours"]}),
+                    &all_events,
+                )?;
+                let overlaps = plan.zones.iter().any(|z| {
+                    s::zoned(&day, 0.0, z)
+                        .ok()
+                        .zip(s::zoned(&day, 24.0, z).ok())
+                        .is_some_and(|(a, b)| a < vb && b > va)
+                });
+                if overlaps {
+                    plans.push((day, plan));
+                }
+            }
+        }
+        let inferred = plans.iter().any(|(_, p)| p.affected);
+        if inferred {
+            // Keep closed dates for zero-slot metadata selection; generation
+            // below gates on each actual host date's weekday.
+            days = plans.iter().map(|(d, _)| d.clone()).collect();
+            if let (Some(a), Some(b)) = (
+                plans
+                    .iter()
+                    .flat_map(|(d, p)| p.zones.iter().filter_map(move |z| s::zoned(d, 0.0, z).ok()))
+                    .min(),
+                plans
+                    .iter()
+                    .flat_map(|(d, p)| {
+                        p.zones
+                            .iter()
+                            .filter_map(move |z| s::zoned(d, 24.0, z).ok())
+                    })
+                    .max(),
+            ) {
+                start = iso(a);
+                end = iso(b);
+            }
+        }
+        if days.is_empty() {
+            return Ok(result);
+        }
+        let mut context_busy: Vec<_> = all_busy
+            .into_iter()
+            .filter(|v| s::overlaps(&ca, &cb, v) || (inferred && s::overlaps(&start, &end, v)))
+            .collect();
+        if inferred {
+            for (_, plan) in &plans {
+                context_busy.extend(
+                    plan.blocked
+                        .iter()
+                        .map(|b| json!({"start":iso(b.start),"end":iso(b.end)})),
+                );
+            }
+            context_busy.sort_by_key(|v| epoch(&text(v, "start")));
+            context_busy.dedup();
+        }
+        let context_events: Vec<_> = all_events
+            .iter()
+            .filter(|v| s::overlaps(&ca, &cb, v) || (inferred && s::overlaps(&start, &end, v)))
+            .cloned()
+            .collect();
         let busy: Vec<_> = context_busy
             .iter()
-            .filter(|v| s::overlaps(&start, &end, v))
+            .filter(|v| inferred || s::overlaps(&start, &end, v))
             .cloned()
             .collect();
         let events: Vec<_> = context_events
@@ -425,29 +518,38 @@ impl App {
         let cutoff = now() + (Self::notice(&settings, &learning) * 60_000.0) as i64;
         let mut preliminary = vec![];
         for day in &days {
-            preliminary.extend(s::candidates(&json!({"day":day,"busy":busy,"durationMinutes":duration,"bufferMinutes":settings["minimumTravelBufferMinutes"],"hours":settings["hours"],"zone":zone,"limit":96,"notBefore":cutoff}))?)
+            let request = json!({"day":day,"busy":busy,"durationMinutes":duration,"bufferMinutes":settings["minimumTravelBufferMinutes"],"hours":settings["hours"],"zone":zone,"source":host["source"],"limit":96,"notBefore":cutoff});
+            let mut slots = if inferred && !(1..=5).contains(&s::weekday(day)?) {
+                vec![]
+            } else if inferred {
+                array(&travel::slot_path(&request, &all_events, None)?["candidates"])
+            } else {
+                s::candidates(&request)?
+            };
+            slots.retain(|v| epoch(&text(v, "start")).is_some_and(|t| t >= va && t < vb));
+            slots.sort_by_key(|v| epoch(&text(v, "start")));
+            preliminary.push(slots);
         }
-        preliminary.retain(|v| epoch(&text(v, "start")).is_some_and(|t| t >= va && t < vb));
-        preliminary.sort_by_key(|v| epoch(&text(v, "start")));
-        let travel = json!({
-            "eventCount": events.iter().filter(|event| event["inPerson"] == true).count(),
-            "maximumBufferMinutes": settings["minimumTravelBufferMinutes"],
-            "routeProvider": "none",
-            "adviceSource": "none",
-        });
-        let safe = preliminary;
         let feedback = if let Some(snapshot) = snapshot {
             array(&snapshot["feedback"])
         } else {
             self.db.feedback()?
         };
         let mut candidates = vec![];
-        for day in &days {
-            let da = iso(s::zoned(day, 0.0, &zone)?);
-            let db = iso(s::zoned(day, 24.0, &zone)?);
+        let mut origins = vec![];
+        for (index, day) in days.iter().enumerate() {
+            let day_zone = if inferred {
+                &plans[index].1.zone
+            } else {
+                &zone
+            };
+            let da = iso(s::zoned(day, 0.0, day_zone)?);
+            let db = iso(s::zoned(day, 24.0, day_zone)?);
+            // Retain every transit block in ranking input, including a second
+            // zone's work window outside the primary zone's civil-day bounds.
             let day_busy: Vec<_> = busy
                 .iter()
-                .filter(|v| s::overlaps(&da, &db, v))
+                .filter(|v| inferred || s::overlaps(&da, &db, v))
                 .cloned()
                 .collect();
             let day_events: Vec<_> = events
@@ -455,24 +557,39 @@ impl App {
                 .filter(|v| s::overlaps(&da, &db, v))
                 .cloned()
                 .collect();
-            let c: Vec<_> = safe
-                .iter()
-                .filter(|v| {
-                    epoch(&text(v, "start"))
-                        .and_then(|t| s::date(t, &zone).ok())
-                        .as_ref()
-                        == Some(day)
-                })
-                .cloned()
-                .collect();
-            let input = json!({"day":day,"zone":zone,"hours":settings["hours"],"busy":day_busy,"events":day_events,"rules":rules,"learning":learning,"weekBusy":context_busy,"weekEvents":context_events,"candidates":c});
+            let input = json!({"day":day,"zone":day_zone,"hours":settings["hours"],"busy":day_busy,"events":day_events,"rules":rules,"learning":learning,"weekBusy":context_busy,"weekEvents":context_events,"candidates":preliminary[index]});
             let load = w::day(&input)?;
             let arranged = w::arrange(&input)?;
-            candidates.extend(w::rank(&json!({"candidates":arranged,"zone":zone,"busy":day_busy,"feedback":feedback,"meetingDay":number(&w::types(&load),"meetings")>=60.0||number(&load,"meetings")>=2.0}))?);
+            let ranked = w::rank(
+                &json!({"candidates":arranged,"zone":day_zone,"busy":day_busy,"feedback":feedback,"meetingDay":number(&w::types(&load),"meetings")>=60.0||number(&load,"meetings")>=2.0}),
+            )?;
+            for slot in ranked {
+                if !candidates.contains(&slot) {
+                    candidates.push(slot);
+                    origins.push(index);
+                }
+            }
         }
         candidates.truncate(limit);
+        origins.truncate(limit);
+        if inferred {
+            // Select the host date contributing most RETURNED slots. Ties and
+            // zero-slot results use the first overlapping host date.
+            let mut counts = vec![0; plans.len()];
+            for origin in origins {
+                counts[origin] += 1;
+            }
+            let mut chosen = 0;
+            for i in 1..counts.len() {
+                if counts[i] > counts[chosen] {
+                    chosen = i;
+                }
+            }
+            result["hostTimezone"] = json!(plans[chosen].1.zone);
+            result["hostTimezoneSource"] = json!(plans[chosen].1.source);
+        }
         result["candidates"] = json!(candidates);
-        result["travel"] = json!({"inPersonEventCount":travel["eventCount"],"maximumBufferMinutes":travel["maximumBufferMinutes"],"routeProvider":travel["routeProvider"],"adviceSource":travel["adviceSource"]});
+        result["travel"] = json!({"inPersonEventCount":events.iter().filter(|e| e["inPerson"] == true).count(),"maximumBufferMinutes":settings["minimumTravelBufferMinutes"],"routeProvider":"none","adviceSource":"none"});
         Ok(result)
     }
     async fn dates(&self, input: &Value) -> Result<Value> {
@@ -524,10 +641,15 @@ impl App {
             let start = iso(s::zoned(&s::monday(&first)?, 0.0, &zone)?);
             let end = iso(s::zoned(&s::shift(&s::monday(&last)?, 12)?, 0.0, &zone)?);
             for field in ["busy", "events"] {
+                let history = if field == "events" && self.travel_timezones() {
+                    iso(epoch(&start).expect("calendar bound") - 32 * 86_400_000)
+                } else {
+                    start.clone()
+                };
                 snapshot[field] = json!(
                     array(&snapshot[field])
                         .into_iter()
-                        .filter(|v| s::overlaps(&start, &end, v))
+                        .filter(|v| s::overlaps(&history, &end, v))
                         .collect::<Vec<_>>()
                 );
             }
@@ -595,6 +717,7 @@ impl App {
                 Some(&calendar),
                 &iso(s::zoned(&start_day, 0.0, &zone)?),
                 &iso(s::zoned(&today, 0.0, &zone)?),
+                false,
             )
             .await?;
         let mut learned = w::learn(
@@ -613,6 +736,7 @@ impl App {
                 Some(&calendar),
                 &iso(s::zoned(&upcoming[0], 0.0, &zone)?),
                 &iso(s::zoned(upcoming.last().expect("nonempty"), 24.0, &zone)?),
+                false,
             )
             .await?;
         let mut notice_days = vec![];
