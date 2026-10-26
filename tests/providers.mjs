@@ -12,31 +12,33 @@ import { GOOGLE_SCOPES } from '../reference/lib/google-accounts.js';
 const root=new URL('..',import.meta.url).pathname;
 const binary=new URL('../target/debug/jev-calendar',import.meta.url).pathname;
 async function port(){const s=createServer().listen(0,'127.0.0.1');await once(s,'listening');const p=s.address().port;await new Promise(r=>s.close(r));return p;}
-async function fixture(t,{travel=false,travelDates=['2030-10-07'],learningAgeMs=0,jevLow=false,calendarRefreshMs=60_000,previewMaxAgeMs=120_000,tripitEvents=null,travelFlag='',tripitName='Synthetic (TripIt)'}={}){
+async function fixture(t,{travel=false,travelDates=['2030-10-07'],learningAgeMs=0,jevLow=false,calendarRefreshMs=60_000,previewMaxAgeMs=120_000,tripitEvents=null,travelFlag='',tripitName='Synthetic (TripIt)',bookingTypes,bookingFlag='',bookingAccounts=false}={}){
  const dir=mkdtempSync(join(tmpdir(),'jev-rust-provider-')),path=join(dir,'fixture.sqlite'),store=new SqliteStore({path,encryptionSecret:'synthetic-key'});
  const token={access_token:'owner-token',refresh_token:'synthetic-refresh',scope:GOOGLE_SCOPES,expires_at:Date.now()+3600_000};store.connectGoogle('owner@example.test',token);const session=store.newSession();
+ if(bookingAccounts)store.connectGoogle('team@team.example.test',{...token,access_token:'synthetic-team-token'});
+ if(bookingTypes!==undefined)store.putSetting('bookingTypes',bookingTypes);
  store.putSetting('settings',{timezone:'Europe/Rome',hours:{start:9,end:18},baseLocation:travel?'Synthetic Base Street 1':'',minimumBookingNoticeMinutes:0,minimumTravelBufferMinutes:10});
  store.putSetting('projectRules',[]);
  store.putSetting('workloadLearning',{signature:JSON.stringify(['week-intelligence-v1',{start:9,end:18},0,[],'Europe/Rome']),updatedAt:new Date(Date.now()-learningAgeMs).toISOString(),bookingNotice:{source:'fallback',minutes:0},baselineBusyMinutes:135,typicalProjectMinutes:{}});
- const state={jevLow,tripitEvents,calls:[],events:new Map(),creationCount:0,updateCount:0,loseCreate:false,loseGet:false,loseCancel:false,missingCalendar:false,newCalendar:false,routeLimit:false,refreshGate:null};
+ const state={extraCalendars:bookingAccounts?[{id:'personal-work@group.example.test',accessRole:'writer',account:'owner@example.test'},{id:'team-work@group.example.test',accessRole:'owner',account:'team@team.example.test'}]:[],eventDestinations:new Map(),jevLow,tripitEvents,calls:[],events:new Map(),creationCount:0,updateCount:0,loseCreate:false,loseGet:false,loseCancel:false,missingCalendar:false,newCalendar:false,routeLimit:false,refreshGate:null};
  const provider=createServer(async(req,res)=>{const url=new URL(req.url,'http://fixture.test');let raw='';for await(const chunk of req)raw+=chunk;const body=raw&&req.headers['content-type']?.includes('json')?JSON.parse(raw):{};const bearer=req.headers.authorization||'';state.calls.push({path:url.pathname,query:url.search,method:req.method,body,bearer,etag:req.headers['if-match']});const send=(code,value)=>{res.writeHead(code,{'Content-Type':'application/json'});res.end(JSON.stringify(value));};
   if(url.pathname==='/oauth/token'){if(state.refreshGate)await state.refreshGate;const form=new URLSearchParams(raw);const identity=form.get('code')==='wrong-owner'?'other':'owner';return send(200,{access_token:identity+'-token',refresh_token:'synthetic-refresh',scope:GOOGLE_SCOPES,expires_in:3600});}
   if(url.pathname==='/calendar/v3/users/me/settings/timezone')return send(200,{value:'Europe/Rome'});
-  if(url.pathname==='/calendar/v3/users/me/calendarList'){const identity=bearer==='Bearer other-token'?'other':'owner';const calendars=[{id:identity+'@example.test',primary:true,accessRole:'owner',summary:'Synthetic primary'},...Array.from({length:52},(_,n)=>({id:'shared-'+n,hidden:n===0,selected:false,accessRole:n===1?'freeBusyReader':'reader',summary:'Synthetic '+n}))];if(state.tripitEvents)calendars.push({id:'synthetic-travel-calendar',summary:tripitName,accessRole:'reader',timeZone:'UTC'});if(state.subscription)calendars.push({id:'synthetic@group.v.calendar.google.com',accessRole:state.subscriptionRole||'reader',timeZone:'Pacific/Honolulu'});if(state.newCalendar)calendars.push({id:'new-hidden',hidden:true,accessRole:'freeBusyReader'});return send(200,{items:url.searchParams.has('pageToken')?calendars.slice(30):calendars.slice(0,30),...(!url.searchParams.has('pageToken')?{nextPageToken:'page-two'}:{})});}
+  if(url.pathname==='/calendar/v3/users/me/calendarList'){const identity=bearer==='Bearer synthetic-team-token'?'team@team.example.test':bearer==='Bearer other-token'?'other@example.test':'owner@example.test';const calendars=[{id:identity,primary:true,accessRole:'owner',summary:'Synthetic primary'},...Array.from({length:52},(_,n)=>({id:'shared-'+n,hidden:n===0,selected:false,accessRole:n===1?'freeBusyReader':'reader',summary:'Synthetic '+n}))];calendars.push(...state.extraCalendars.filter(c=>c.account===identity));if(state.tripitEvents)calendars.push({id:'synthetic-travel-calendar',summary:tripitName,accessRole:'reader',timeZone:'UTC'});if(state.subscription)calendars.push({id:'synthetic@group.v.calendar.google.com',accessRole:state.subscriptionRole||'reader',timeZone:'Pacific/Honolulu'});if(state.newCalendar)calendars.push({id:'new-hidden',hidden:true,accessRole:'freeBusyReader'});return send(200,{items:url.searchParams.has('pageToken')?calendars.slice(30):calendars.slice(0,30),...(!url.searchParams.has('pageToken')?{nextPageToken:'page-two'}:{})});}
   if(url.pathname==='/calendar/v3/freeBusy'){if(Date.parse(body.timeMax)-Date.parse(body.timeMin)>35*86400_000)return send(400,{error:{reason:'timeRangeTooLong'}});const calendars={};for(const item of body.items){if(state.missingCalendar&&item.id==='shared-0')continue;if(item.id==='synthetic@group.v.calendar.google.com'){calendars[item.id]={errors:[{domain:'global',reason:state.subscriptionError||'notFound'}],busy:[]};continue;}calendars[item.id]={busy:[...(item.id==='synthetic-travel-calendar'&&!state.omitTripitBusy?(state.tripitEvents||[]).map(e=>({start:e.start.dateTime,end:e.end.dateTime})):[]),...(item.id==='shared-0'?[{start:'2030-10-07T07:00:00.000Z',end:'2030-10-07T08:00:00.000Z'},...(state.extraBusy?[state.extraBusy]:[])]:[]),...(travel&&item.id==='shared-2'?travelDates.map(date=>({start:date+'T10:00:00.000Z',end:date+'T11:00:00.000Z'})):[])]};}return send(200,{calendars});}
-  if(url.pathname==='/calendar/v3/calendars/primary/events'&&req.method==='POST'){if(state.createGate)await state.createGate;state.creationCount++;assert.match(body.id,/^[0-9a-v]{5,1024}$/);if(state.events.has(body.id))return send(409,{error:'duplicate'});const event={...body,id:body.id,etag:'revision-0',hangoutLink:'https://meet.google.com/synthetic'};state.events.set(body.id,event);if(state.loseCreate){state.loseCreate=false;state.loseGet=true;req.socket.destroy();return;}return send(200,event);}
-  if(url.pathname.startsWith('/calendar/v3/calendars/primary/events/')){const id=decodeURIComponent(url.pathname.split('/').at(-1)),event=state.events.get(id);if(req.method==='GET'){if(state.loseGet){state.loseGet=false;return send(503,{error:'readback unavailable'});}return event?send(200,event):send(404,{});}if(!event)return send(404,{});if(req.headers['if-match']!==event.etag)return send(412,{});state.updateCount++;if(req.method==='DELETE'){state.events.set(id,{id,status:'cancelled'});if(state.loseCancel){state.loseCancel=false;req.socket.destroy();return;}return send(204,null);}const moved={...event,...body,etag:'revision-'+state.updateCount};state.events.set(id,moved);return send(200,moved);}
+  if(/^\/calendar\/v3\/calendars\/[^/]+\/events$/.test(url.pathname)&&req.method==='POST'){if(state.createGate)await state.createGate;state.creationCount++;assert.match(body.id,/^[0-9a-v]{5,1024}$/);if(state.events.has(body.id))return send(409,{error:'duplicate'});const event={...body,id:body.id,etag:'revision-0',hangoutLink:bookingAccounts?'https://meet.example.test/synthetic':'https://meet.google.com/synthetic'};state.events.set(body.id,event);state.eventDestinations.set(body.id,{calendar:decodeURIComponent(url.pathname.split('/').at(-2)),bearer});if(state.loseCreate){state.loseCreate=false;state.loseGet=true;req.socket.destroy();return;}return send(200,event);}
+  if(/^\/calendar\/v3\/calendars\/[^/]+\/events\/[^/]+$/.test(url.pathname)){const id=decodeURIComponent(url.pathname.split('/').at(-1)),destination=state.eventDestinations.get(id),calendar=decodeURIComponent(url.pathname.split('/').at(-3));const event=(!destination||(destination.calendar===calendar&&destination.bearer===bearer))?state.events.get(id):undefined;if(req.method==='GET'){if(state.loseGet){state.loseGet=false;return send(503,{error:'readback unavailable'});}return event?send(200,event):send(404,{});}if(!event)return send(404,{});if(req.headers['if-match']!==event.etag)return send(412,{});state.updateCount++;if(req.method==='DELETE'){state.events.set(id,{id,status:'cancelled'});if(state.loseCancel){state.loseCancel=false;req.socket.destroy();return;}return send(204,null);}const moved={...event,...body,etag:'revision-'+state.updateCount};state.events.set(id,moved);return send(200,moved);}
   if(/\/calendar\/v3\/calendars\/.+\/events$/.test(url.pathname)){const id=decodeURIComponent(url.pathname.split('/').at(-2));if(id==='synthetic-travel-calendar')return send(200,{items:(state.tripitEvents||[]).filter(e=>Date.parse(e.end.dateTime)>Date.parse(url.searchParams.get('timeMin'))&&Date.parse(e.start.dateTime)<Date.parse(url.searchParams.get('timeMax')))});if(id==='synthetic@group.v.calendar.google.com'){if(state.subscriptionFailure)return send(503,{});if(state.subscriptionMalformed)return send(200,{timeZone:'Pacific/Honolulu',items:[{start:{date:'invalid'},end:{date:'2030-10-09'}}]});const page=url.searchParams.has('pageToken');return send(200,{timeZone:'Pacific/Honolulu',items:page?[{start:{date:'2030-10-08'},end:{date:'2030-10-09'}}]:[{start:{dateTime:'2030-10-07T09:00:00Z'},end:{dateTime:'2030-10-07T10:00:00Z'}},...['transparent','cancelled','declined'].map(kind=>({start:{dateTime:'2030-10-07T10:00:00Z'},end:{dateTime:'2030-10-07T18:00:00Z'},...(kind==='transparent'?{transparency:kind}:kind==='cancelled'?{status:kind}:{attendees:[{self:true,responseStatus:kind}]})}))],...(!page?{nextPageToken:'events-two'}:{})});}return send(200,{items:travel&&id==='shared-2'?travelDates.map(date=>({start:{dateTime:date+'T10:00:00.000Z'},end:{dateTime:date+'T11:00:00.000Z'},location:'Synthetic Event Street 2',summary:'Team1 [meeting]',status:'confirmed'})):[]});}
   if(url.pathname==='/routes'){if(state.routeLimit||(state.routeWalkFail&&body.travelMode==='WALK'))return send(429,{});if(state.routeReply)return send(200,state.routeReply(body));return send(200,{routes:[{duration:body.travelMode==='WALK'?'300s':'600s',distanceMeters:1000}]});}
   if(url.pathname==='/jev'){const answers={};for(const[key,q]of Object.entries(body.questions)){const choices=Object.keys(q.criteria),choice=key==='travel_mode'?'WALK':key==='extra_buffer'?'MIN_5':key==='booking_notice'?'BASE':'cluster_meetings';answers[key]={type:'choice',choice,confidence:state.jevLow?.2:.9,probabilities:Object.fromEntries(choices.map(c=>[c,c===choice?1:0]))};}return send(200,{model:'jev-1.13.0',answers});}
   if(url.pathname==='/photon')return send(200,{features:[{properties:{osm_type:'N',osm_id:42,street:'Synthetic Street',housenumber:'1',city:'Rome',country:'Italy'},geometry:{coordinates:[12.5,41.9]}}]});
   return send(404,{});
  }).listen(0,'127.0.0.1');await once(provider,'listening');const providerOrigin=`http://127.0.0.1:${provider.address().port}`;const p=await port(),origin=`http://127.0.0.1:${p}`;
- const processOptions={cwd:root+'reference',env:{PATH:process.env.PATH,PORT:String(p),DATABASE_PATH:path,APP_ENCRYPTION_KEY:'synthetic-key',DEMO_MODE:'false',APP_BASE_URL:origin,GOOGLE_CLIENT_ID:'synthetic-client',GOOGLE_CLIENT_SECRET:'synthetic-secret',GOOGLE_ROUTES_API_KEY:'synthetic-routes',TYPESAFE_API_KEY:'synthetic-jev',JEV_TEST_MODE:'true',JEV_TRAVEL_TIMEZONES:travelFlag,JEV_TEST_CALENDAR_REFRESH_MS:String(calendarRefreshMs),JEV_TEST_PREVIEW_MAX_AGE_MS:String(previewMaxAgeMs),JEV_TEST_PROVIDER_ORIGIN:providerOrigin},stdio:['ignore','pipe','pipe']};let child=spawn(binary,['--private'],processOptions);let logs='';child.stderr.on('data',d=>logs+=d);await Promise.race([once(child.stdout,'data'),once(child,'exit').then(()=>{throw Error('Failed startup: '+logs)})]);
+ const processOptions={cwd:root+'reference',env:{PATH:process.env.PATH,PORT:String(p),DATABASE_PATH:path,APP_ENCRYPTION_KEY:'synthetic-key',DEMO_MODE:'false',APP_BASE_URL:origin,GOOGLE_CLIENT_ID:'synthetic-client',GOOGLE_CLIENT_SECRET:'synthetic-secret',GOOGLE_ROUTES_API_KEY:'synthetic-routes',TYPESAFE_API_KEY:'synthetic-jev',JEV_TEST_MODE:'true',JEV_TRAVEL_TIMEZONES:travelFlag,JEV_BOOKING_TYPES:bookingFlag,...(bookingAccounts?{PUBLIC_HOST:'book.example.test'}:{}),JEV_TEST_CALENDAR_REFRESH_MS:String(calendarRefreshMs),JEV_TEST_PREVIEW_MAX_AGE_MS:String(previewMaxAgeMs),JEV_TEST_PROVIDER_ORIGIN:providerOrigin},stdio:['ignore','pipe','pipe']};let child=spawn(binary,['--private'],processOptions);let logs='';child.stderr.on('data',d=>logs+=d);await Promise.race([once(child.stdout,'data'),once(child,'exit').then(()=>{throw Error('Failed startup: '+logs)})]);
  t.after(async()=>{if(child.exitCode===null){child.kill();await once(child,'exit');}provider.closeAllConnections();await new Promise(r=>provider.close(r));store.db.close();rmSync(dir,{recursive:true,force:true});});
  const api=(path,body,headers={})=>fetch(origin+path,{method:body===undefined?'GET':'POST',headers:{'Content-Type':'application/json',...headers},...(body!==undefined?{body:JSON.stringify(body)}:{}),redirect:'manual'});
  const owner={Cookie:`jev_session=${session}`,Origin:origin,'X-Jev-Owner':'1'};
- return{state,store,api,origin,owner,get child(){return child;},providerOrigin,async restart(){child.kill();await once(child,'exit');child=spawn(binary,['--private'],processOptions);child.stderr.on('data',d=>logs+=d);await Promise.race([once(child.stdout,'data'),once(child,'exit').then(()=>{throw Error('Failed restart: '+logs)})]);}};
+ return{state,store,api,origin,owner,get child(){return child;},providerOrigin,async restart(bookingFlag){if(bookingFlag!==undefined)processOptions.env.JEV_BOOKING_TYPES=bookingFlag;child.kill();await once(child,'exit');child=spawn(binary,['--private'],processOptions);child.stderr.on('data',d=>logs+=d);await Promise.race([once(child.stdout,'data'),once(child,'exit').then(()=>{throw Error('Failed restart: '+logs)})]);}};
 }
 test('real adapters paginate every calendar, fail closed and discover new hidden calendars',async t=>{const f=await fixture(t);const input={date:'2030-10-07',viewerTimeZone:'Europe/Rome',durationMinutes:30};let r=await f.api('/api/availability',input);assert.equal(r.status,200,await r.clone().text());let v=await r.json();assert.ok(v.candidates.every(c=>Date.parse(c.start)>=Date.parse('2030-10-07T08:10:00Z')));assert.ok(f.state.calls.some(c=>c.path.endsWith('calendarList')&&c.query.includes('pageToken')));assert.ok(f.state.calls.filter(c=>c.path.endsWith('freeBusy')).every(c=>c.body.items.length<=50));assert.ok(f.state.calls.some(c=>c.path.endsWith('freeBusy')&&c.body.items.some(i=>i.id==='shared-1')));f.state.newCalendar=true;await f.api('/api/availability',input);assert.ok(f.state.calls.some(c=>c.path.endsWith('freeBusy')&&c.body.items.some(i=>i.id==='new-hidden')));f.state.missingCalendar=true;r=await f.api('/api/availability',input);assert.equal(r.status,400);assert.match((await r.json()).error,/every Google calendar/);});
 test('Google creation survives lost response, replays once and preserves event and Meet during changes',async t=>{const f=await fixture(t);const input={date:'2030-10-07',viewerTimeZone:'Europe/Rome',durationMinutes:30};const slots=await(await f.api('/api/availability',input)).json();const body={...input,...slots.candidates[0],idempotencyKey:'lost-creation-synthetic-key',guestName:'Synthetic Guest',guestEmail:'guest@example.test',meetingTitle:'Synthetic test'};f.state.loseCreate=true;let r=await f.api('/api/book',body);assert.equal(r.status,503,await r.clone().text());await f.restart();r=await f.api('/api/book',body);assert.equal(r.status,200,await r.clone().text());const booking=(await r.json()).booking;assert.equal(f.state.creationCount,1);assert.equal(booking.meetLink,'https://meet.google.com/synthetic');r=await f.api('/api/book',body);assert.equal(r.status,200);assert.equal(f.state.creationCount,1);const token=new URLSearchParams(new URL(booking.managementUrl).hash.slice(1)).get('token');const view=await(await f.api('/api/booking/view',{token})).json();const next=await(await f.api('/api/booking/slots',{token,date:'2030-10-08',viewerTimeZone:'Europe/Rome'})).json();r=await f.api('/api/booking/change',{token,action:'reschedule',revision:view.revision,date:'2030-10-08',viewerTimeZone:'Europe/Rome',...next.candidates[0]});assert.equal(r.status,200,await r.clone().text());assert.equal((await r.json()).meetLink,booking.meetLink);assert.equal(f.state.events.get(booking.eventId).hangoutLink,booking.meetLink);assert.ok(f.state.calls.some(c=>c.method==='PATCH'&&c.etag==='revision-0'&&c.query.includes('sendUpdates=all')));f.state.loseCancel=true;r=await f.api('/api/booking/change',{token,action:'cancel',revision:1});assert.equal(r.status,200);assert.equal((await r.json()).status,'cancelled');assert.equal(f.state.creationCount,1);assert.equal(f.store.get(body.idempotencyKey).status,'cancelled');});
@@ -276,4 +278,198 @@ test('a viewer date crossing Cancun and Rome selects the host date with most ret
  f.store.putSetting('settings',{...f.store.getSetting('settings'),hours:{start:9,end:9}});
  r=await f.api('/api/availability',input);assert.equal(r.status,200);
  const empty=await r.json();assert.deepEqual(empty.candidates,[]);assert.equal(empty.hostTimezone,'America/Cancun');assert.equal(empty.hostTimezoneSource,'travel');
+});
+
+/* Booking-types spec: shared synthetic setup for the Tests bullets below.
+ * The binary alone handles requests; the frozen Node store only seeds SQLite.
+ */
+const syntheticBookingTypes = () => [
+ {id:'personal',label:'Personal',accountId:'owner@example.test',calendarId:'personal-work@group.example.test',default:true},
+ {id:'team1',label:'Team1',accountId:'team@team.example.test',calendarId:'team-work@group.example.test',default:false},
+];
+const typeFixture = (t,options={}) => fixture(t,{bookingAccounts:true,bookingTypes:syntheticBookingTypes(),...options});
+async function typeInput(f,key,day=travelMonday()) {
+ const input={date:day,viewerTimeZone:'Europe/Rome',durationMinutes:30};
+ const response=await f.api('/api/availability',input);
+ assert.equal(response.status,200,await response.clone().text());
+ const slots=await response.json();assert.ok(slots.candidates.length,'synthetic fixture offers a future slot');
+ return {...input,...slots.candidates[0],guestName:'Synthetic Guest',guestEmail:'guest@example.test',meetingTitle:'Synthetic booking types',idempotencyKey:key};
+}
+function noDestinationLeaks(value) {
+ const serialized=JSON.stringify(value);
+ assert.doesNotMatch(serialized,/"(?:accountId|googleAccountId|calendarId|google_account_id|calendar_id)"/);
+ for(const entry of syntheticBookingTypes()) {
+  assert.ok(!serialized.includes(entry.accountId),'public output hides account identity');
+  assert.ok(!serialized.includes(entry.calendarId),'public output hides calendar identity');
+ }
+}
+function createdCall(f) { return f.state.calls.find(c=>c.method==='POST'&&/\/calendars\/[^/]+\/events$/.test(c.path)); }
+function assertDestination(call,type,method='POST',eventId='') {
+ assert.ok(call,`${method} must reach the fake Google provider`);
+ assert.equal(call.path,`/calendar/v3/calendars/${encodeURIComponent(type.calendarId)}/events${eventId?'/'+eventId:''}`);
+ assert.equal(call.bearer,type.accountId==='team@team.example.test'?'Bearer synthetic-team-token':'Bearer owner-token');
+}
+
+/* Spec Tests: Config validation (valid list); active config only exposes id/label.
+ * Boundary/invalid validation rules are also exercised by the binary CLI below.
+ */
+test('booking types: active config exposes ordered choices and default without destination leaks',async t=>{
+ const f=await typeFixture(t),r=await f.api('/api/config');assert.equal(r.status,200);
+ const value=await r.json();
+ assert.deepEqual(value.bookingTypes,[{id:'personal',label:'Personal'},{id:'team1',label:'Team1'}]);
+ assert.equal(value.defaultBookingType,'personal');noDestinationLeaks(value);
+});
+
+/* Spec Tests: Flag off (off/0/false) is byte-for-byte legacy; on without a list
+ * is legacy. Invalid stored lists are wholly unconfigured; inactive input ignored.
+ */
+test('booking types: rollback spellings and absent/invalid lists preserve legacy config and primary creation',async t=>{
+ const baseline=await fixture(t),expected=await(await baseline.api('/api/config')).text();
+ const scenarios=[...['off','OFF','0','false','FaLsE'].map(bookingFlag=>({bookingFlag})),
+  {bookingFlag:'on',bookingTypes:undefined},{bookingTypes:[]},{bookingTypes:[{...syntheticBookingTypes()[0],extra:true}]}];
+ for(const [n,options] of scenarios.entries())await t.test(JSON.stringify(options),async t=>{
+  const f=await typeFixture(t,options);assert.equal(await(await f.api('/api/config')).text(),expected);
+  const body=await typeInput(f,`synthetic-inactive-${n}`);f.state.calls.length=0;
+  const r=await f.api('/api/book',{...body,bookingType:{ignored:true}});assert.equal(r.status,201,await r.clone().text());
+  assertDestination(createdCall(f),{accountId:'owner@example.test',calendarId:'primary'});
+  const columns=f.store.db.prepare('PRAGMA table_info(bookings)').all().map(c=>c.name);
+  assert.ok(columns.includes('booking_type')&&columns.includes('calendar_id'),'startup adds nullable booking-type columns even when inactive');
+  const row=f.store.db.prepare('SELECT booking_type,calendar_id FROM bookings WHERE idempotency_key=?').get(body.idempotencyKey);
+  assert.equal(row.booking_type,null);assert.equal(row.calendar_id,null);
+ });
+});
+
+/* Spec Tests: Active personal/team1/missing type routing; stored row; no public
+ * account/calendar leak. Primary is a config-only destination change.
+ */
+for(const [name,bookingType,index,primary] of [['personal','personal',0,false],['team1','team1',1,false],['missing',undefined,0,false],['null',null,0,false],['primary','personal',0,true]]) {
+ test(`booking types: ${name} creates on its configured account and calendar and persists destination`,async t=>{
+  const types=syntheticBookingTypes();if(primary)types[0].calendarId='primary';
+  const f=await typeFixture(t,{bookingTypes:types}),body=await typeInput(f,'synthetic-routing-'+name);
+  f.state.calls.length=0;const r=await f.api('/api/book',{...body,...(bookingType===undefined?{}:{bookingType})});
+  assert.equal(r.status,201,await r.clone().text());assertDestination(createdCall(f),types[index]);
+  const columns=f.store.db.prepare('PRAGMA table_info(bookings)').all().map(c=>c.name);
+  assert.ok(columns.includes('booking_type')&&columns.includes('calendar_id'),'booking destination columns must exist');
+  const row=f.store.db.prepare('SELECT booking_type,calendar_id,google_account_id FROM bookings WHERE idempotency_key=?').get(body.idempotencyKey);
+  assert.deepEqual({...row},{booking_type:types[index].id,calendar_id:types[index].calendarId,google_account_id:types[index].accountId});
+  const value=await r.json();noDestinationLeaks(value);
+  const token=new URLSearchParams(new URL(value.booking.managementUrl).hash.slice(1)).get('token');
+  const view=await f.api('/api/booking/view',{token});assert.equal(view.status,200,await view.clone().text());noDestinationLeaks(await view.json());
+ });
+}
+
+/* Spec Tests: Unknown/non-string type rejects with 400 and ZERO provider calls;
+ * disconnected or non-writable destination fails closed with zero creations.
+ */
+for(const bookingType of ['unknown',42,false,{},[]])test(`booking types: invalid request type ${JSON.stringify(bookingType)} is rejected before provider access`,async t=>{
+ const f=await typeFixture(t),body=await typeInput(f,'synthetic-invalid-type');f.state.calls.length=0;
+ const r=await f.api('/api/book',{...body,bookingType});const value=await r.json();
+ assert.equal(r.status,400,JSON.stringify(value));assert.match(value.error,/booking\s*type/i);
+ assert.equal(f.state.calls.length,0);assert.equal(f.state.creationCount,0);noDestinationLeaks(value);
+});
+for(const reason of ['disconnected','missing calendar','reader','freeBusyReader'])test(`booking types: ${reason} destination cannot create or silently fall back`,async t=>{
+ const f=await typeFixture(t),body=await typeInput(f,'synthetic-closed-destination');
+ if(reason==='disconnected')f.store.disconnectGoogle('team@team.example.test');
+ else if(reason==='missing calendar')f.state.extraCalendars=f.state.extraCalendars.filter(c=>c.account!=='team@team.example.test');
+ else f.state.extraCalendars.find(c=>c.account==='team@team.example.test').accessRole=reason;
+ f.state.calls.length=0;const r=await f.api('/api/book',{...body,bookingType:'team1'}),value=await r.json();
+ assert.ok(r.status>=400&&r.status<500,JSON.stringify(value));assert.match(value.error,reason==='disconnected'?/connect|account/i:/calendar|writ|access/i);
+ assert.equal(f.state.creationCount,0);assert.equal(createdCall(f),undefined);noDestinationLeaks(value);
+});
+
+/* Spec Tests: Stored row's calendar/account survives reschedule, cancel and flag
+ * rollback; legacy NULL uses primary. Seed columns here to isolate routing from
+ * migration (the separate CLI test verifies migration by the unmodified binary).
+ */
+function seedTypedBooking(f,{legacy=false}={}) {
+ const columns=f.store.db.prepare('PRAGMA table_info(bookings)').all().map(c=>c.name);
+ for(const name of ['booking_type','calendar_id'])if(!columns.includes(name))f.store.db.exec(`ALTER TABLE bookings ADD COLUMN ${name} TEXT`);
+ const key='synthetic-stored-type',id='syntheticstored123',day=travelMonday(),type=syntheticBookingTypes()[1];
+ const start=day+'T12:00:00.000Z',end=day+'T12:30:00.000Z',calendar=legacy?'primary':type.calendarId;
+ f.store.db.prepare("INSERT INTO bookings (idempotency_key,start,end,buffer_minutes,status,event_id,created_at,google_account_id,booking_type,calendar_id,revision) VALUES (?,?,?,?,?,?,?,?,?,?,0)").run(key,start,end,10,'confirmed',id,new Date().toISOString(),type.accountId,legacy?null:type.id,legacy?null:calendar);
+ f.state.events.set(id,{id,etag:'revision-0',start:{dateTime:start},end:{dateTime:end},hangoutLink:'https://meet.example.test/synthetic'});
+ f.state.eventDestinations.set(id,{calendar,bearer:'Bearer synthetic-team-token'});
+ const token=new BookingLinks({secret:'synthetic-key',publicOrigin:'https://book.example.test'}).token(key);
+ return {token,key,id,type:{...type,calendarId:calendar},day};
+}
+for(const flag of ['on','off'])for(const legacy of [false,true])for(const action of ['view','reschedule','cancel']) {
+ test(`booking types: stored ${legacy?'NULL primary':'calendar'} ${action} with flag ${flag} retains original destination`,async t=>{
+  const f=await typeFixture(t,{bookingFlag:flag}),b=seedTypedBooking(f,{legacy});
+  // Changing both the default and configured destination must not reroute a row.
+  f.store.putSetting('bookingTypes',[{...syntheticBookingTypes()[0],default:true}]);
+  f.state.calls.length=0;
+  const next=shiftTravelDate(b.day,1),payload=action==='reschedule'?{date:next,start:next+'T12:00:00.000Z',end:next+'T12:30:00.000Z',viewerTimeZone:'Europe/Rome'}:{};
+  const r=await f.api(action==='view'?'/api/booking/view':'/api/booking/change',{token:b.token,...(action==='view'?{}:{action,revision:0,...payload})});
+  assertDestination(f.state.calls.find(c=>c.method==='GET'&&c.path.endsWith('/'+b.id)),b.type,'GET',b.id);
+  assert.equal(r.status,200,await r.clone().text());noDestinationLeaks(await r.json());
+  if(action!=='view')assertDestination(f.state.calls.find(c=>c.method===(action==='cancel'?'DELETE':'PATCH')),b.type,action==='cancel'?'DELETE':'PATCH',b.id);
+  if(action==='reschedule') {
+   const row=f.store.db.prepare('SELECT booking_type,calendar_id,google_account_id FROM bookings WHERE idempotency_key=?').get(b.key);
+   assert.deepEqual({...row},{booking_type:legacy?null:'team1',calendar_id:legacy?null:b.type.calendarId,google_account_id:b.type.accountId});
+  }
+ });
+}
+
+/* Spec Tests: Availability still queries ALL calendars of ALL accounts, including
+ * both destinations; booking and reschedule fresh checks keep this coverage.
+ */
+function assertAllTypeCalendars(calls) {
+ for(const type of syntheticBookingTypes()) {
+  const bearer=type.accountId==='owner@example.test'?'Bearer owner-token':'Bearer synthetic-team-token';
+  assert.ok(calls.some(c=>c.path.endsWith('/calendarList')&&c.bearer===bearer));
+  for(const id of [type.calendarId,type.accountId,'shared-0','shared-51'])assert.ok(calls.some(c=>c.path.endsWith('/freeBusy')&&c.bearer===bearer&&c.body.items.some(i=>i.id===id)),`freeBusy includes ${id} under correct token`);
+ }
+}
+test('booking types: previews and fresh booking verification read every account and target calendar',async t=>{
+ const f=await typeFixture(t),body=await typeInput(f,'synthetic-all-calendars');assertAllTypeCalendars(f.state.calls);
+ f.state.calls.length=0;const r=await f.api('/api/book',{...body,bookingType:'personal'});assert.equal(r.status,201,await r.clone().text());assertAllTypeCalendars(f.state.calls);
+ const b=seedTypedBooking(f,{legacy:true});f.state.calls.length=0;const next=shiftTravelDate(b.day,2);
+ const changed=await f.api('/api/booking/change',{token:b.token,action:'reschedule',revision:0,date:next,start:next+'T12:00:00.000Z',end:next+'T12:30:00.000Z',viewerTimeZone:'Europe/Rome'});
+ assert.equal(changed.status,200,await changed.clone().text());assertAllTypeCalendars(f.state.calls);
+});
+
+/* Spec Tests: Idempotent replay with changed bookingType rejects like changed
+ * fields; exact replay is stable and no additional provider event is dispatched.
+ */
+test('booking types: a changed type cannot replay an existing idempotency key',async t=>{
+ const f=await typeFixture(t),body={...await typeInput(f,'synthetic-type-idempotency'),bookingType:'personal'};
+ let r=await f.api('/api/book',body);assert.equal(r.status,201,await r.clone().text());
+ r=await f.api('/api/book',body);assert.equal(r.status,200,await r.clone().text());assert.equal(f.state.creationCount,1);
+ f.state.calls.length=0;r=await f.api('/api/book',{...body,bookingType:'team1'});
+ assert.equal(r.status,400,await r.clone().text());assert.match((await r.json()).error,/different|changed|already used/i);
+ assert.equal(f.state.creationCount,1);assert.equal(f.state.calls.length,0);
+});
+
+/* Public API/UI spec: preview_fingerprint includes stored bookingTypes; changing
+ * configuration invalidates an otherwise reusable snapshot without a restart.
+ */
+test('booking types: changing the stored list invalidates a warmed calendar preview',async t=>{
+ const f=await typeFixture(t),month=await currentPreview(f);
+ f.store.putSetting('bookingTypes',syntheticBookingTypes().map(v=>({...v,label:v.label+' changed'})));
+ const r=await f.api('/api/availability',{date:month.dates[0],viewerTimeZone:'Europe/Rome'});
+ assert.equal(r.status,400,await r.clone().text());assert.match((await r.json()).error,/refresh|calendar changed/i);
+});
+
+/* Spec Tests: Config defaults need not be the first entry; unknown flag values
+ * enable the feature. Missing/null requests choose the configured default.
+ */
+for(const bookingType of [undefined,null])test(`booking types: ${bookingType===undefined?'missing':'null'} type honors a non-first default`,async t=>{
+ const types=syntheticBookingTypes().map(v=>({...v,default:v.id==='team1'}));
+ const f=await typeFixture(t,{bookingTypes:types,bookingFlag:'enabled'}),body=await typeInput(f,'synthetic-nonfirst-default');
+ const r=await f.api('/api/book',{...body,...(bookingType===undefined?{}:{bookingType})});
+ assert.equal(r.status,201,await r.clone().text());assertDestination(createdCall(f),types[1]);
+});
+
+/* Spec Tests: No accountId/calendarId leaks in public config, booking, manage,
+ * slots or change responses. Kept independent of the routing assertions.
+ */
+test('booking types: every public lifecycle response hides destination identities',async t=>{
+ const f=await typeFixture(t),body=await typeInput(f,'synthetic-public-destination-redaction');
+ const config=await f.api('/api/config');noDestinationLeaks(await config.json());
+ const created=await f.api('/api/book',{...body,bookingType:'team1'});assert.equal(created.status,201);
+ const value=await created.json();noDestinationLeaks(value);
+ const token=new URLSearchParams(new URL(value.booking.managementUrl).hash.slice(1)).get('token');
+ for(const [path,input] of [['/api/booking/view',{token}],['/api/booking/slots',{token,date:shiftTravelDate(body.date,1),viewerTimeZone:'Europe/Rome'}],['/api/booking/change',{token,action:'cancel',revision:0}]]) {
+  const response=await f.api(path,input);assert.equal(response.status,200,await response.clone().text());noDestinationLeaks(await response.json());
+ }
 });
