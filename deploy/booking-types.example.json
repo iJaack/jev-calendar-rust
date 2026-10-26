@@ -1,0 +1,16 @@
+[
+  {
+    "id": "personal",
+    "label": "Personal",
+    "accountId": "<connected personal Google account id>",
+    "calendarId": "<personal calendar id or primary>",
+    "default": true
+  },
+  {
+    "id": "team1",
+    "label": "Team1",
+    "accountId": "<connected Team1 Google account id>",
+    "calendarId": "<Team1 calendar id>",
+    "default": false
+  }
+]

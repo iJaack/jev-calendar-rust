@@ -473,3 +473,26 @@ test('booking types: every public lifecycle response hides destination identitie
   const response=await f.api(path,input);assert.equal(response.status,200,await response.clone().text());noDestinationLeaks(await response.json());
  }
 });
+
+
+test('booking types: a newly busy slot invalidates the preview and wakes its refresh worker',async t=>{
+ const f=await typeFixture(t,{calendarRefreshMs:60_000});
+ const month=await currentPreview(f),date=month.dates[0],slot=month.firstDateAvailability.candidates[0];
+ assert.ok(slot,'the warmed preview offers a slot');
+ f.state.extraBusy=slot;
+ const response=await f.api('/api/book',{...slot,date,durationMinutes:30,viewerTimeZone:'Europe/Rome',guestName:'Synthetic Guest',guestEmail:'guest@example.test',idempotencyKey:'synthetic-type-preview-conflict',bookingType:'personal'});
+ assert.equal(response.status,400);assert.equal((await response.json()).error,'That slot is no longer available');
+ assert.equal(f.state.creationCount,0);
+ // A fresh snapshot must arrive well before the 60-second periodic refresh.
+ const deadline=Date.now()+3000;
+ for(;;) {
+  const preview=await f.api('/api/availability',{date,durationMinutes:30,viewerTimeZone:'Europe/Rome'}),value=await preview.json();
+  if(preview.status===200) {
+   assert.ok(!value.candidates.some(c=>c.start===slot.start),'the rejected slot must not remain in the preview');
+   break;
+  }
+  assert.equal(preview.status,400);assert.match(value.error,/refresh/i);
+  assert.ok(Date.now()<deadline,'booking conflict must wake the refresh worker');
+  await new Promise(r=>setTimeout(r,20));
+ }
+});

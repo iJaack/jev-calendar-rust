@@ -1,5 +1,7 @@
 use crate::{
-    advisory, array, crypto, epoch, hash, iso, now, number,
+    advisory, array, crypto, epoch, hash, iso,
+    management::InvalidBookingType,
+    now, number,
     providers::{self, Calendar, Providers},
     scheduling as s,
     store::Store,
@@ -193,6 +195,13 @@ impl App {
             json!({"timezone":if s::valid_zone(&zone){zone}else{"Europe/Rome".into()},"source":"settings"}),
         )
     }
+    pub(crate) fn booking_types(&self) -> Result<Value> {
+        if travel::enabled(Some(&self.env("JEV_BOOKING_TYPES"))) {
+            self.db.booking_types()
+        } else {
+            Ok(Value::Null)
+        }
+    }
     fn travel_timezones(&self) -> bool {
         !self.demo && travel::enabled(Some(&self.env("JEV_TRAVEL_TIMEZONES")))
     }
@@ -244,18 +253,22 @@ impl App {
         Ok(crate::canonical(&json!([
             self.db.accounts()?,
             self.db.setting("googleBookingAccountId", Value::Null)?,
+            self.db
+                .query("SELECT value FROM settings WHERE key='bookingTypes'", &[])?,
             settings["timezone"],
             settings["timezoneSource"],
             settings["timezoneUpdatedAt"]
         ]))
         .to_string())
     }
-    fn invalidate_preview(&self) {
+    fn invalidate_preview(&self, wake_worker: bool) {
         if let Ok(mut state) = self.previews.lock() {
             state.generation += 1;
             state.snapshot = None;
         }
-        self.preview_changed.notify_one();
+        if wake_worker {
+            self.preview_changed.notify_one();
+        }
     }
     async fn refresh_preview(&self) -> Result<()> {
         let generation = self
@@ -893,10 +906,22 @@ impl App {
         }
         if method == Method::GET && path == "/api/config" {
             let accounts = self.providers.list()?;
-            return Ok(response(
-                200,
-                json!({"demo":self.demo,"googleConnected":!accounts.is_empty(),"googleAllCalendarsAuthorized":!accounts.is_empty()&&accounts.iter().all(|a|a["allCalendarsAuthorized"]==true),"hostTimezone":self.settings()?["timezone"]}),
-            ));
+            let mut config = json!({"demo":self.demo,"googleConnected":!accounts.is_empty(),"googleAllCalendarsAuthorized":!accounts.is_empty()&&accounts.iter().all(|a|a["allCalendarsAuthorized"]==true),"hostTimezone":self.settings()?["timezone"]});
+            let types = self.booking_types()?;
+            if let Some(entries) = types.as_array() {
+                config["bookingTypes"] = json!(
+                    entries
+                        .iter()
+                        .map(|entry| json!({"id":entry["id"],"label":entry["label"]}))
+                        .collect::<Vec<_>>()
+                );
+                config["defaultBookingType"] = entries
+                    .iter()
+                    .find(|entry| entry["default"] == true)
+                    .expect("validated default")["id"]
+                    .clone();
+            }
+            return Ok(response(200, config));
         }
         if path == "/api/integrations/jaack-os/bookings"
             || path.starts_with("/api/integrations/jaack-os/bookings/")
@@ -997,7 +1022,7 @@ impl App {
             if method == Method::GET {
                 return Ok(response(
                     200,
-                    json!({"accounts":self.providers.list()?,"demo":self.demo}),
+                    json!({"accounts":self.providers.list()?,"demo":self.demo,"bookingTypes":self.db.booking_types()?,"bookingTypesEnabled":travel::enabled(Some(&self.env("JEV_BOOKING_TYPES")))}),
                 ));
             }
             if !self.mutation(headers)? {
@@ -1215,7 +1240,11 @@ impl App {
                 Err(e) => {
                     let pending =
                         self.db.get(&text(input, "idempotencyKey"))?["status"] == "pending";
-                    Ok(error(if pending { 503 } else { 400 }, &e.to_string()))
+                    let mut r = error(if pending { 503 } else { 400 }, &e.to_string());
+                    if let Some(invalid_type) = e.downcast_ref::<InvalidBookingType>() {
+                        r.extensions_mut().insert(*invalid_type);
+                    }
+                    Ok(r)
                 }
             };
         }
@@ -1360,7 +1389,24 @@ async fn private_handler(State(app): State<Arc<App>>, request: Request<Body>) ->
             && r.status().is_success()
             || path == "/auth/google/callback" && r.status().is_redirection();
     if !app.demo && (changes_calendar || changes_configuration) {
-        app.invalidate_preview();
+        if path == "/api/book" && app.booking_types().is_ok_and(|types| !types.is_null()) {
+            // Only successful replays and explicit type validation failures skip invalidation.
+            if r.status().as_u16() == 201 {
+                app.invalidate_preview(false);
+                // Complete the mutation's refresh before returning, so its reads do not
+                // spill into a subsequent replay. On failure the worker retries normally.
+                if let Err(error) = app.refresh_preview().await {
+                    eprintln!("Calendar refresh after booking: {error}");
+                    app.preview_changed.notify_one();
+                }
+            } else if r.status().as_u16() != 200
+                && r.extensions().get::<InvalidBookingType>().is_none()
+            {
+                app.invalidate_preview(true);
+            }
+        } else {
+            app.invalidate_preview(true);
+        }
     }
     r.headers_mut()
         .insert("X-Jev-Backend", "rust".parse().expect("valid header"));
@@ -1580,9 +1626,17 @@ pub async fn run() -> Result<()> {
     let env: HashMap<_, _> = std::env::vars().collect();
     let public = mode == "--public";
     ensure!(
-        ["--public", "--private", "--backup"].contains(&mode),
-        "Use --private, --public, --evaluate or --backup"
+        [
+            "--public",
+            "--private",
+            "--backup",
+            "--set-booking-types",
+            "--show-booking-types"
+        ]
+        .contains(&mode),
+        "Use --private, --public, --evaluate, --backup, --set-booking-types or --show-booking-types"
     );
+    let offline = ["--backup", "--set-booking-types", "--show-booking-types"].contains(&mode);
     let port = env
         .get(if public { "PUBLIC_PORT" } else { "PORT" })
         .map(|v| v.parse::<u16>())
@@ -1590,7 +1644,7 @@ pub async fn run() -> Result<()> {
         .unwrap_or(if public { 3031 } else { 3030 });
     let live = env.get("JEV_ALLOW_LIVE_STATE").is_some_and(|v| v == "1");
     ensure!(
-        live || ![3030, 3031].contains(&port) || mode == "--backup",
+        live || ![3030, 3031].contains(&port) || offline,
         "Production ports require JEV_ALLOW_LIVE_STATE=1; use an isolated port for testing"
     );
     let demo = env.get("DEMO_MODE").is_none_or(|v| v != "false");
@@ -1622,6 +1676,23 @@ pub async fn run() -> Result<()> {
                 .ok_or_else(|| anyhow!("Supply backup destination"))?,
         )?;
         println!("Backup complete");
+        return Ok(());
+    }
+    if mode == "--set-booking-types" {
+        let file = args
+            .get(2)
+            .ok_or_else(|| anyhow!("Supply booking types JSON file"))?;
+        let value: Value = serde_json::from_str(&std::fs::read_to_string(file)?)
+            .map_err(|_| anyhow!("Invalid booking types JSON"))?;
+        crate::store::validate_booking_types(&value)?;
+        db.put("bookingTypes", &value)?;
+        for entry in array(&value) {
+            println!("{}: {}", text(&entry, "id"), text(&entry, "label"));
+        }
+        return Ok(());
+    }
+    if mode == "--show-booking-types" {
+        println!("{}", db.setting("bookingTypes", Value::Null)?);
         return Ok(());
     }
     let providers = Providers::new(db.clone(), env.clone())?;

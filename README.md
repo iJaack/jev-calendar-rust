@@ -69,6 +69,24 @@ The shared preview and fresh confirmation paths read events from 30 days before 
 
 `JEV_TRAVEL_TIMEZONES` defaults to on. Set it to `off`, `0` or `false` (case-insensitive) and restart through the existing authorized deployment process to roll back to the previous timezone/slot path. With no relevant TripIt data, existing response JSON and timezone sources are preserved. This switch needs no database migration; ordinary release rollback remains available.
 
+## Booking types
+
+When a valid `bookingTypes` setting is stored and `JEV_BOOKING_TYPES` is enabled (the default), the public form requires a choice under “What is this for?”. Each type routes new events to its configured Google account and calendar. Public responses expose only ids and labels; the session-protected owner dashboard lists destinations and flags disconnected accounts. Availability still checks every calendar of every connected account. A destination must be connected and its calendar writable (`writer`/`owner`), or `primary`.
+
+The setting is a JSON array of 1–10 objects, for example:
+
+```json
+[{"id":"personal","label":"Personal","accountId":"<connected Google account id>","calendarId":"primary","default":true}]
+```
+
+Ids are unique, match `^[a-z0-9][a-z0-9-]{0,31}$`, and labels contain 1–40 characters on one line. Account/calendar ids must be non-empty strings. Exactly one entry must have `default: true`; other entries may omit `default` or use `false`. Unknown keys reject the whole list. See `deploy/booking-types.example.json` for a two-type placeholder configuration. Missing/null request types use the default, including older clients; invalid request types fail before provider calls. The type participates in idempotency comparisons.
+
+Use `DATABASE_PATH=/absolute/path/to/database.sqlite jev-calendar --set-booking-types /private/path/types.json` to validate and atomically save the list. This prints only ids and labels. `--show-booking-types` prints the stored JSON for owner inspection; it contains destination identifiers, never tokens. Both commands follow the offline `--backup` path and do not start a listener. Existing live-state guards still apply.
+
+For rollback, set `JEV_BOOKING_TYPES=off`, `0`, or `false` (case-insensitive) and restart through the authorized release process. Disabled, absent or invalid configuration preserves legacy config/payload behavior: new bookings use `googleBookingAccountId` and `primary`, storing NULL type/calendar. Startup adds nullable `booking_type` and `calendar_id` columns idempotently without changing old rows. Existing bookings always retain their stored account/calendar during view, retry, reschedule and cancellation, even after rollback; legacy NULL calendars mean `primary`. To switch Personal to the account’s primary calendar, change only its `calendarId` to `"primary"` and reload the configuration with the CLI; existing bookings keep their original destination.
+
+After deployment authorization, the release sequence is: build and validate, take a consistent backup with `--backup`, run `--set-booking-types` against the **live DB** with the private configuration, verify the stored list with `--show-booking-types`, then restart through the guarded release process. Verify public choices, owner destination/connection status and preview readiness after restart. Retain the backup and previous release. Configuration files containing real destinations stay outside Git.
+
 ## Build and validate
 
 Rust 1.93.1 is pinned. Cargo.lock records the exact resolved dependencies. Keep compilation to two jobs on the shared Mac. Python 3.12 or later restores the captured Node test oracle on a fresh checkout and rejects modified reference files. Build outputs, release packages, credentials, SQLite databases and private backups are excluded from Git; retained raw evidence stays local.

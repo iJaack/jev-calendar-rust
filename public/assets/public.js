@@ -273,6 +273,21 @@ function activateTime(row, slot) {
   const next = row.querySelector('.next-button'); next.disabled = false; next.tabIndex = 0; next.setAttribute('aria-hidden', 'false'); next.focus();
 }
 
+function renderBookingTypes(types) {
+  if (!Array.isArray(types) || !types.length) return;
+  const group = document.createElement('fieldset'); group.className = 'booking-types';
+  const legend = document.createElement('legend'); legend.textContent = 'What is this for?'; group.append(legend);
+  for (const type of types) {
+    const label = document.createElement('label');
+    const radio = document.createElement('input');
+    radio.type = 'radio'; radio.name = 'bookingType'; radio.value = type.id; radio.required = true;
+    radio.checked = types.length === 1;
+    const text = document.createElement('span'); text.textContent = type.label;
+    label.append(radio, text); group.append(label);
+  }
+  $('booking-type-options').append(group);
+}
+
 function showDetails(slot) {
   clearAvailabilityTimers();
   ++state.availabilityRequest;
@@ -327,6 +342,8 @@ $('booking-form').addEventListener('submit', async (event) => {
       guestEmail: $('guest-email').value,
       meetingTitle: $('meeting-title').value,
     };
+    const selectedType = $('booking-form').querySelector('input[name="bookingType"]:checked');
+    if (selectedType) bookingInput.bookingType = selectedType.value;
     const signature = JSON.stringify(bookingInput);
     if (state.bookingAttempt?.signature !== signature) state.bookingAttempt = { signature, key: crypto.randomUUID() };
     const result = await request('/api/book', {
@@ -337,6 +354,11 @@ $('booking-form').addEventListener('submit', async (event) => {
     $('details-step').classList.add('hidden'); $('success-step').classList.remove('hidden');
     $('confirmed-title').textContent = result.booking.meetingTitle || '';
     $('success-summary').innerHTML = `<strong>${fullDateTime(state.choice.start)}</strong><span>${state.durationMinutes} min · Google Meet · ${zoneLabel(state.viewerTimeZone)}</span>`;
+    if (selectedType) {
+      const label = result.booking.bookingTypeLabel || selectedType.closest('label').textContent;
+      const type = document.createElement('span'); type.textContent = label;
+      $('success-summary').append(type);
+    }
     if (result.booking.managementUrl) { $('manage-booking').href = result.booking.managementUrl; $('manage-booking').classList.remove('hidden'); }
     if (result.booking.meetLink) { $('meet-link').href = result.booking.meetLink; $('meet-link').classList.remove('hidden'); }
   } catch (error) {
@@ -349,6 +371,7 @@ $('booking-form').addEventListener('submit', async (event) => {
 
 populateTimeZones(state.viewerTimeZone);
 fetch('/api/config').then((response) => response.json()).then((config) => {
+  renderBookingTypes(config.bookingTypes);
   if (config.demo) $('demo-note').textContent = 'Demo mode';
   if (config.hostTimezone) $('host-timezone').textContent = zoneLabel(config.hostTimezone);
 }).catch(() => {});

@@ -52,6 +52,13 @@ pub struct Calendar {
     pub destination: String,
     lists: tokio::sync::Mutex<HashMap<String, Vec<Value>>>,
 }
+fn booking_calendar(record: &Value) -> &str {
+    record["calendarId"].as_str().unwrap_or("primary")
+}
+fn booking_calendar_path(record: &Value) -> String {
+    // Form encoding uses '+' for spaces; path segments require percent encoding.
+    encode(booking_calendar(record)).replace('+', "%20")
+}
 fn blocks_time(event: &Value) -> bool {
     event["status"] != "cancelled"
         && event["transparency"] != "transparent"
@@ -530,12 +537,16 @@ impl Providers {
         );
         Ok(a)
     }
-    pub async fn get_event(&self, id: &str, event: &str) -> Result<Value> {
+    pub async fn get_event(&self, record: &Value) -> Result<Value> {
         match self
             .request(
-                &self.account_for(id)?,
+                &self.account_for(&text(record, "googleAccountId"))?,
                 reqwest::Method::GET,
-                &format!("/calendars/primary/events/{}", encode(event)),
+                &format!(
+                    "/calendars/{}/events/{}",
+                    booking_calendar_path(record),
+                    encode(&text(record, "eventId"))
+                ),
                 None,
                 None,
             )
@@ -544,6 +555,20 @@ impl Providers {
             Err(e) if status(&e).is_some_and(|s| s == 404 || s == 410) => Ok(Value::Null),
             r => r,
         }
+    }
+    pub async fn check_booking_calendar(&self, record: &Value) -> Result<()> {
+        let account = self.account_for(&text(record, "googleAccountId"))?;
+        let id = booking_calendar(record);
+        if id != "primary" {
+            let calendar = self.calendar()?;
+            let calendars = self.calendars(&calendar, &account).await?;
+            ensure!(
+                calendars.iter().any(|c| c["id"] == id
+                    && matches!(c["accessRole"].as_str(), Some("writer" | "owner"))),
+                "The booking type calendar is unavailable or not writable. Please contact Jaack."
+            );
+        }
+        Ok(())
     }
     pub async fn create(&self, v: &Value) -> Result<Value> {
         let links = &v["managementLinks"];
@@ -555,7 +580,10 @@ impl Providers {
             .request(
                 &self.account_for(&text(v, "googleAccountId"))?,
                 reqwest::Method::POST,
-                "/calendars/primary/events?sendUpdates=all&conferenceDataVersion=1",
+                &format!(
+                    "/calendars/{}/events?sendUpdates=all&conferenceDataVersion=1",
+                    booking_calendar_path(v)
+                ),
                 Some(&body),
                 None,
             )
@@ -571,7 +599,8 @@ impl Providers {
             "Google did not return an event version. Please try again."
         );
         let path = format!(
-            "/calendars/primary/events/{}?sendUpdates=all{}",
+            "/calendars/{}/events/{}?sendUpdates=all{}",
+            booking_calendar_path(record),
             encode(&event),
             if change["action"] == "cancel" {
                 ""

@@ -5,7 +5,68 @@ use crate::{
 use anyhow::{Result, anyhow, ensure};
 use rusqlite::{Connection, OptionalExtension, params, types::ValueRef};
 use serde_json::{Value, json};
-use std::{path::Path, sync::Mutex};
+use std::{collections::HashSet, path::Path, sync::Mutex};
+
+// One validator serves both CLI writes and activation of stored configuration.
+pub fn validate_booking_types(value: &Value) -> Result<()> {
+    let entries = value
+        .as_array()
+        .ok_or_else(|| anyhow!("Booking types must be an array"))?;
+    ensure!(
+        !entries.is_empty() && entries.len() <= 10,
+        "Booking types require 1..10 entries"
+    );
+    let mut ids = HashSet::new();
+    let mut defaults = 0;
+    for entry in entries {
+        let object = entry
+            .as_object()
+            .ok_or_else(|| anyhow!("Booking types require object entries"))?;
+        ensure!(
+            object
+                .keys()
+                .all(|key| ["id", "label", "accountId", "calendarId", "default"]
+                    .contains(&key.as_str())),
+            "Booking types contain an unknown key"
+        );
+        let id = entry["id"].as_str().unwrap_or("");
+        ensure!(
+            !id.is_empty()
+                && id.len() <= 32
+                && id
+                    .bytes()
+                    .next()
+                    .is_some_and(|c| c.is_ascii_lowercase() || c.is_ascii_digit())
+                && id
+                    .bytes()
+                    .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == b'-'),
+            "Booking types require valid ids"
+        );
+        ensure!(ids.insert(id), "Booking types require unique ids");
+        let label = entry["label"].as_str().unwrap_or("");
+        ensure!(
+            (1..=40).contains(&label.chars().count())
+                && !label
+                    .chars()
+                    .any(|c| matches!(c, '\r' | '\n' | '\u{85}' | '\u{2028}' | '\u{2029}')),
+            "Booking types require single-line labels of 1..40 characters"
+        );
+        for key in ["accountId", "calendarId"] {
+            ensure!(
+                entry[key].as_str().is_some_and(|s| !s.is_empty()),
+                "Booking types require non-empty accountId and calendarId strings"
+            );
+        }
+        if let Some(default) = object.get("default") {
+            let default = default
+                .as_bool()
+                .ok_or_else(|| anyhow!("Booking types default must be boolean"))?;
+            defaults += usize::from(default);
+        }
+    }
+    ensure!(defaults == 1, "Booking types require exactly one default");
+    Ok(())
+}
 
 pub struct Store {
     connection: Mutex<Connection>,
@@ -30,7 +91,7 @@ pub fn rows(c: &Connection, sql: &str, p: &[&dyn rusqlite::ToSql]) -> Result<Vec
     Ok(values.collect::<std::result::Result<Vec<_>, _>>()?)
 }
 fn booking(c: &Connection, key: &str) -> Result<Value> {
-    let mut v=rows(c,"SELECT idempotency_key AS idempotencyKey,start,end,buffer_minutes AS bufferMinutes,guest_name AS guestName,guest_email AS guestEmail,status,event_id AS eventId,meet_link AS meetLink,meeting_title AS meetingTitle,google_account_id AS googleAccountId,revision,pending_change AS pendingChange,created_at AS createdAt FROM bookings WHERE idempotency_key=?",&[&key])?.into_iter().next().unwrap_or(Value::Null);
+    let mut v=rows(c,"SELECT idempotency_key AS idempotencyKey,start,end,buffer_minutes AS bufferMinutes,guest_name AS guestName,guest_email AS guestEmail,status,event_id AS eventId,meet_link AS meetLink,meeting_title AS meetingTitle,google_account_id AS googleAccountId,revision,pending_change AS pendingChange,created_at AS createdAt,booking_type AS bookingType,calendar_id AS calendarId FROM bookings WHERE idempotency_key=?",&[&key])?.into_iter().next().unwrap_or(Value::Null);
     if !v.is_null() {
         v["pendingChange"] = v["pendingChange"]
             .as_str()
@@ -120,6 +181,8 @@ CREATE TABLE IF NOT EXISTS booking_slot_outcomes (booking_hash TEXT NOT NULL,sta
             ("meet_link", "TEXT"),
             ("meeting_title", "TEXT"),
             ("google_account_id", "TEXT"),
+            ("booking_type", "TEXT"),
+            ("calendar_id", "TEXT"),
             ("revision", "INTEGER NOT NULL DEFAULT 0"),
             ("pending_change", "TEXT"),
             ("source_id", "TEXT"),
@@ -168,6 +231,18 @@ CREATE TABLE IF NOT EXISTS booking_slot_outcomes (booking_hash TEXT NOT NULL,sta
     pub fn setting(&self, key: &str, fallback: Value) -> Result<Value> {
         self.with(|c| setting(c, key, fallback))
     }
+    pub fn booking_types(&self) -> Result<Value> {
+        let rows = self.query("SELECT value FROM settings WHERE key='bookingTypes'", &[])?;
+        let value = rows
+            .first()
+            .and_then(|row| serde_json::from_str::<Value>(&text(row, "value")).ok())
+            .unwrap_or(Value::Null);
+        Ok(if validate_booking_types(&value).is_ok() {
+            value
+        } else {
+            Value::Null
+        })
+    }
     pub fn put(&self, key: &str, v: &Value) -> Result<()> {
         self.with(|c| put(c, key, v))
     }
@@ -215,11 +290,12 @@ CREATE TABLE IF NOT EXISTS booking_slot_outcomes (booking_hash TEXT NOT NULL,sta
             }
             check_slot(c, v, "")?;
             c.execute(
-                "INSERT INTO bookings (idempotency_key,source_id,start,end,buffer_minutes,guest_name,guest_email,meeting_title,google_account_id,status,created_at) VALUES (?,?,?,?,?,?,?,?,?,'pending',?)",
+                "INSERT INTO bookings (idempotency_key,source_id,start,end,buffer_minutes,guest_name,guest_email,meeting_title,google_account_id,booking_type,calendar_id,status,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,'pending',?)",
                 params![key, hash(&key), text(v, "start"), text(v, "end"),
                     number(v, "bufferMinutes"), v["guestName"].as_str(),
                     v["guestEmail"].as_str(), v["meetingTitle"].as_str(),
-                    v["googleAccountId"].as_str(), iso(now())],
+                    v["googleAccountId"].as_str(), v["bookingType"].as_str(),
+                    v["calendarId"].as_str(), iso(now())],
             )?;
             booking(c, &key)
         }))
@@ -441,5 +517,135 @@ CREATE TABLE IF NOT EXISTS booking_slot_outcomes (booking_hash TEXT NOT NULL,sta
             )?;
             Ok(())
         })
+    }
+}
+
+#[cfg(test)]
+mod booking_type_tests {
+    use super::*;
+
+    fn valid() -> Value {
+        json!([
+            {"id":"personal","label":"Personal","accountId":"owner@example.test","calendarId":"primary","default":true},
+            {"id":"team1","label":"Team1","accountId":"team@example.test","calendarId":"work@example.test"}
+        ])
+    }
+
+    #[test]
+    fn accepts_boundaries_and_a_nonfirst_default() {
+        assert!(validate_booking_types(&valid()).is_ok());
+        let entries: Vec<_> = (0..10)
+            .map(|i| {
+                json!({
+                    "id":format!("type-{i}"),"label":"é".repeat(40),
+                    "accountId":"synthetic","calendarId":"primary","default":i == 9
+                })
+            })
+            .collect();
+        assert!(validate_booking_types(&json!(entries)).is_ok());
+        let mut value = valid();
+        value[0]["id"] = json!("a".repeat(32));
+        assert!(validate_booking_types(&value).is_ok());
+    }
+
+    #[test]
+    fn rejects_invalid_lists_and_entries() {
+        for value in [
+            Value::Null,
+            json!({}),
+            json!([]),
+            json!([null]),
+            json!([true]),
+            json!(["type"]),
+            json!(vec![valid()[0].clone(); 11]),
+        ] {
+            assert!(validate_booking_types(&value).is_err(), "accepted {value}");
+        }
+    }
+
+    #[test]
+    fn rejects_invalid_or_duplicate_ids() {
+        for id in [
+            json!(""),
+            json!("a".repeat(33)),
+            json!("Personal"),
+            json!("-a"),
+            json!("a_b"),
+            json!("café"),
+            json!("a\n"),
+            json!(42),
+            Value::Null,
+            json!("team1"),
+        ] {
+            let mut value = valid();
+            value[0]["id"] = id;
+            assert!(validate_booking_types(&value).is_err(), "accepted {value}");
+        }
+    }
+
+    #[test]
+    fn rejects_invalid_labels_and_destinations() {
+        for label in [
+            json!(""),
+            json!("é".repeat(41)),
+            json!("two\nlines"),
+            json!("two\rlines"),
+            json!("two\u{2028}lines"),
+            json!(42),
+            Value::Null,
+        ] {
+            let mut value = valid();
+            value[0]["label"] = label;
+            assert!(validate_booking_types(&value).is_err(), "accepted {value}");
+        }
+        for key in ["accountId", "calendarId"] {
+            for invalid in [json!(""), json!(42), Value::Null, json!(false)] {
+                let mut value = valid();
+                value[0][key] = invalid;
+                assert!(validate_booking_types(&value).is_err(), "accepted {value}");
+            }
+        }
+    }
+
+    #[test]
+    fn rejects_default_errors_missing_required_fields_and_unknown_keys() {
+        let mut value = valid();
+        value[0]["default"] = json!(false);
+        assert!(validate_booking_types(&value).is_err());
+        value = valid();
+        value[1]["default"] = json!(true);
+        assert!(validate_booking_types(&value).is_err());
+        for invalid in [json!("true"), json!(1), Value::Null] {
+            value = valid();
+            value[0]["default"] = invalid;
+            assert!(validate_booking_types(&value).is_err());
+        }
+        for key in ["id", "label", "accountId", "calendarId", "default"] {
+            value = valid();
+            value[0].as_object_mut().unwrap().remove(key);
+            assert!(
+                validate_booking_types(&value).is_err(),
+                "accepted missing {key}"
+            );
+        }
+        value = valid();
+        value[0]["unknown"] = json!(true);
+        assert!(validate_booking_types(&value).is_err());
+    }
+
+    #[test]
+    fn invalid_stored_json_or_configuration_is_unconfigured() {
+        let db = Store::open(":memory:", "synthetic-key").unwrap();
+        assert_eq!(db.booking_types().unwrap(), Value::Null);
+        db.put("bookingTypes", &valid()).unwrap();
+        assert_eq!(db.booking_types().unwrap(), valid());
+        db.put("bookingTypes", &json!([])).unwrap();
+        assert_eq!(db.booking_types().unwrap(), Value::Null);
+        db.execute(
+            "UPDATE settings SET value='{' WHERE key='bookingTypes'",
+            &[],
+        )
+        .unwrap();
+        assert_eq!(db.booking_types().unwrap(), Value::Null);
     }
 }

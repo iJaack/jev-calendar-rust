@@ -4,6 +4,17 @@ use crate::{
 };
 use anyhow::{Result, anyhow, ensure};
 use serde_json::{Value, json};
+
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct InvalidBookingType(&'static str);
+
+impl std::fmt::Display for InvalidBookingType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.0)
+    }
+}
+impl std::error::Error for InvalidBookingType {}
+
 fn same(a: &str, b: &str) -> bool {
     epoch(a) == epoch(b)
 }
@@ -33,10 +44,7 @@ fn mutable(record: &Value) -> Result<()> {
 impl App {
     pub(crate) async fn event(&self, record: &Value) -> Result<Value> {
         if !self.demo {
-            return self
-                .providers
-                .get_event(&text(record, "googleAccountId"), &text(record, "eventId"))
-                .await;
+            return self.providers.get_event(record).await;
         }
         let mut state = self
             .demo_state
@@ -68,7 +76,19 @@ impl App {
         Ok(v)
     }
     pub(crate) fn summary(&self, r: &Value) -> Value {
-        json!({"meetingTitle":r["meetingTitle"],"start":r["start"],"end":r["end"],"status":r["status"],"revision":r["revision"],"pendingAction":r["pendingChange"]["action"],"canChange":r["status"]=="confirmed"&&epoch(&text(r,"start")).is_some_and(|t|t>now()),"meetLink":if r["status"]=="confirmed"{r["meetLink"].clone()}else{Value::Null}})
+        let mut result = json!({"meetingTitle":r["meetingTitle"],"start":r["start"],"end":r["end"],"status":r["status"],"revision":r["revision"],"pendingAction":r["pendingChange"]["action"],"canChange":r["status"]=="confirmed"&&epoch(&text(r,"start")).is_some_and(|t|t>now()),"meetLink":if r["status"]=="confirmed"{r["meetLink"].clone()}else{Value::Null}});
+        self.add_booking_type(&mut result, r);
+        result
+    }
+    fn add_booking_type(&self, result: &mut Value, record: &Value) {
+        if let Some(id) = record["bookingType"].as_str() {
+            result["bookingType"] = json!(id);
+            if let Ok(types) = self.db.booking_types()
+                && let Some(entry) = array(&types).iter().find(|entry| entry["id"] == id)
+            {
+                result["bookingTypeLabel"] = entry["label"].clone();
+            }
+        }
     }
     pub(crate) fn management_record(&self, token: &str) -> Result<Value> {
         let key = crypto::management_key(&self.secret, token)?;
@@ -273,8 +293,40 @@ impl App {
         } else {
             title
         };
+        let types = self.booking_types()?;
+        let selected = if let Some(types) = types.as_array() {
+            ensure!(
+                input["bookingType"].is_null() || input["bookingType"].is_string(),
+                InvalidBookingType("Booking type must be text")
+            );
+            let entry = if input["bookingType"].is_null() {
+                types.iter().find(|entry| entry["default"] == true)
+            } else {
+                types
+                    .iter()
+                    .find(|entry| entry["id"] == input["bookingType"])
+            };
+            entry
+                .ok_or(InvalidBookingType("Unknown booking type"))?
+                .clone()
+        } else {
+            Value::Null
+        };
+        // A retry retains its persisted destination even after configuration changes.
+        let booking_type = if types.is_null() {
+            prior["bookingType"].clone()
+        } else {
+            selected["id"].clone()
+        };
+        let calendar_id = if prior.is_null() {
+            selected["calendarId"].clone()
+        } else {
+            prior["calendarId"].clone()
+        };
         let account = if !prior["googleAccountId"].is_null() {
             prior["googleAccountId"].clone()
+        } else if !selected.is_null() {
+            selected["accountId"].clone()
         } else if self.demo {
             Value::Null
         } else {
@@ -282,15 +334,18 @@ impl App {
         };
         let links = crypto::management_urls(&self.secret, &self.origin, &key);
         Ok(
-            json!({"start":start,"end":end,"bufferMinutes":self.settings()?["minimumTravelBufferMinutes"],"idempotencyKey":key,"guestName":name,"guestEmail":email,"meetingTitle":title,"managementLinks":links,"googleAccountId":account,"providerEventId":format!("jev{}",hash(&key))}),
+            json!({"start":start,"end":end,"bufferMinutes":self.settings()?["minimumTravelBufferMinutes"],"idempotencyKey":key,"guestName":name,"guestEmail":email,"meetingTitle":title,"managementLinks":links,"googleAccountId":account,"bookingType":booking_type,"calendarId":calendar_id,"providerEventId":format!("jev{}",hash(&key))}),
         )
     }
     fn public_booking(&self, record: &Value) -> Value {
         let mut result = record.clone();
         if let Some(v) = result.as_object_mut() {
             v.remove("googleAccountId");
+            v.remove("calendarId");
+            v.remove("bookingType");
             v.remove("pendingChange");
         }
+        self.add_booking_type(&mut result, record);
         result["managementUrl"] = crypto::management_urls(
             &self.secret,
             &self.origin,
@@ -317,7 +372,14 @@ impl App {
                 prior["status"] != "cancelled",
                 "This booking was cancelled. Start a new booking instead."
             );
-            for field in ["start", "end", "guestName", "guestEmail", "meetingTitle"] {
+            for field in [
+                "start",
+                "end",
+                "guestName",
+                "guestEmail",
+                "meetingTitle",
+                "bookingType",
+            ] {
                 ensure!(
                     text(&prior, field) == text(&v, field),
                     "Booking request key already used for a different request"
@@ -348,6 +410,9 @@ impl App {
                     return Ok((200, self.public_booking(&confirmed)));
                 }
             }
+        }
+        if !self.demo && !v["bookingType"].is_null() {
+            self.providers.check_booking_calendar(&v).await?;
         }
         ensure!(
             epoch(&text(&v, "start")).is_some_and(|t| t > now()),
