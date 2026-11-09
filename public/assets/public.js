@@ -252,7 +252,8 @@ function renderSlots() {
   for (const slot of candidates) {
     const row = document.createElement('div'); row.className = 'time-choice';
     const select = document.createElement('button'); select.type = 'button'; select.className = 'time-button'; select.textContent = time(slot.start);
-    const next = document.createElement('button'); next.type = 'button'; next.className = 'next-button'; next.textContent = 'Next'; next.setAttribute('aria-label', `Continue with ${time(slot.start)}`); next.setAttribute('aria-hidden', 'true'); next.tabIndex = -1; next.disabled = true;
+    select.setAttribute('aria-pressed', String(state.choice?.start === slot.start && state.choice?.end === slot.end));
+    const next = document.createElement('button'); next.type = 'button'; next.className = 'next-button'; next.textContent = 'Next'; next.setAttribute('aria-label', `Next, continue with ${time(slot.start)}`); next.setAttribute('aria-hidden', 'true'); next.tabIndex = -1; next.disabled = true;
     select.addEventListener('click', () => activateTime(row, slot));
     next.addEventListener('click', () => showDetails(slot));
     if (state.choice?.start === slot.start && state.choice?.end === slot.end) {
@@ -267,9 +268,11 @@ function activateTime(row, slot) {
   state.choice = slot;
   document.querySelectorAll('.time-choice').forEach((item) => {
     item.classList.remove('selected');
+    item.querySelector('.time-button').setAttribute('aria-pressed', 'false');
     const next = item.querySelector('.next-button'); next.disabled = true; next.tabIndex = -1; next.setAttribute('aria-hidden', 'true');
   });
   row.classList.add('selected');
+  row.querySelector('.time-button').setAttribute('aria-pressed', 'true');
   const next = row.querySelector('.next-button'); next.disabled = false; next.tabIndex = 0; next.setAttribute('aria-hidden', 'false'); next.focus();
 }
 

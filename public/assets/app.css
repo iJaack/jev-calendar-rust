@@ -1,71 +1,52 @@
-/* Booking adaptation of Forma (jaack design system, 2026-10-22).
-   Provenance: vendor/jaack-design-system/VENDOR.md.
-   Shared foundations stay in the vendored bundles: token names, type scale,
-   4 px spacing, glass, top bar, theme.js (light 07–19, Auto/Chiaro/Scuro).
-   This file retunes the palette, gradient, type emphasis and the calendar
-   for book.jaack.me. The site’s own yellow (#e8c547 on near-black) is the
-   accent, not Forma’s antique gold. Vendored files are not edited. */
+/* Forma v2 booking presentation (2026-11-09): warm paper and plum.
+   Canonical sources: vendor/jaack-design-system/VENDOR.md.
+   Shared component overrides and accessibility utilities: jaack-local.css.
+   The booking palette replaces the default accent; loading states are static. */
 
 /* Theme values live on <html>, which paints the page background. */
 html[data-theme="light"]:has(body.booking-page) {
-  --jk-bg: #f4f1e8;
-  --jk-surface: #faf7f0;
-  --jk-surface-2: #e8e2d4;
-  --jk-ink: #16140f;
-  --jk-ink-2: #5a5348;
-  --jk-t2: rgba(22, 20, 15, .70);
-  --jk-t3: rgba(22, 20, 15, .64);
-  --jk-hair: rgba(22, 20, 15, .12);
-  --jk-accent: #e8c547;
-  --jk-accent-text: #6e5300;
-  --jk-on-accent: #14120c;
-  --jk-accent-wash: rgba(232, 197, 71, .28);
+  --jk-bg: #f5f2ec;
+  --jk-surface: #fcfaf6;
+  --jk-ink: #1a1614;
+  --jk-ink-2: #544c48;
+  --jk-t2: rgba(26,22,20,0.72);
+  --jk-t3: rgba(26,22,20,0.64);
+  --jk-accent: #6b4c8a;
+  --jk-accent-text: #573a75;
+  --jk-on-accent: #fcfaf6;
+  --jk-surface-2: #eee8df;
+  --jk-hair: rgba(26,22,20,.12);
+  --jk-accent-wash: rgba(107,76,138,.12);
   --jk-ok: #256b2d;
   --jk-fail: #a33a22;
-  --jk-tint: rgba(250, 247, 240, .72);
-  --jk-tint-hi: rgba(250, 247, 240, .86);
-  --jk-tint-edge: rgba(255, 252, 245, .4);
-  --jk-bg-1: rgba(232, 197, 71, .30);
-  --jk-bg-1b: rgba(232, 197, 71, .10);
-  --jk-bg-2: rgba(176, 142, 78, .24);
-  --jk-bg-2b: rgba(176, 142, 78, .08);
-  --jk-bg-3: rgba(120, 86, 36, .16);
-  --jk-bg-3b: rgba(120, 86, 36, .06);
+  --jk-tint: rgba(252,250,246,.72);
+  --jk-tint-hi: rgba(252,250,246,.86);
+  --jk-tint-edge: rgba(252,250,246,.4);
 }
 html[data-theme="dark"]:has(body.booking-page) {
-  --jk-bg: #0c0c0c;
-  --jk-surface: #141414;
-  --jk-surface-2: #1c1b17;
-  --jk-ink: #f0ede8;
-  --jk-ink-2: #aaa69f;
-  --jk-t2: rgba(240, 237, 232, .70);
-  --jk-t3: rgba(240, 237, 232, .56);
-  --jk-hair: rgba(240, 237, 232, .14);
-  --jk-accent: #e8c547;
-  --jk-accent-text: #e8c547;
-  --jk-on-accent: #14120c;
-  --jk-accent-wash: rgba(232, 197, 71, .16);
-  --jk-ok: #c6b15a;
+  --jk-bg: #15110f;
+  --jk-surface: #1d1815;
+  --jk-ink: #f3ede6;
+  --jk-ink-2: #cfc5bb;
+  --jk-t2: rgba(243,237,230,0.72);
+  --jk-t3: rgba(243,237,230,0.58);
+  --jk-accent: #c3a8e0;
+  --jk-accent-text: #d4bfea;
+  --jk-on-accent: #15110f;
+  --jk-surface-2: #28211c;
+  --jk-hair: rgba(243,237,230,.14);
+  --jk-accent-wash: rgba(195,168,224,.12);
+  --jk-ok: #8fbf8a;
   --jk-fail: #f0a6a0;
-  --jk-tint: rgba(16, 15, 12, .66);
-  --jk-tint-hi: rgba(28, 26, 20, .78);
-  --jk-tint-edge: rgba(16, 15, 12, .34);
-  --jk-bg-1: rgba(232, 197, 71, .16);
-  --jk-bg-1b: rgba(232, 197, 71, .05);
-  --jk-bg-2: rgba(96, 68, 22, .42);
-  --jk-bg-2b: rgba(96, 68, 22, .14);
-  --jk-bg-3: rgba(168, 124, 48, .14);
-  --jk-bg-3b: rgba(168, 124, 48, .05);
+  --jk-tint: rgba(21,17,15,.66);
+  --jk-tint-hi: rgba(29,24,21,.78);
+  --jk-tint-edge: rgba(21,17,15,.34);
 }
 
 .booking-page {
   --jk-topbar-h: 76px;
-  --jk-chapter-gap: 40px;
-  --jk-chapter-gap-m: 28px;
-  --jk-group-gap: 20px;
-  --jk-hero-gap: 14px;
-  --on-accent: #14120c;
-  --book-accent-hover: #f2d66b;
+  --on-accent: var(--jk-on-accent);
+  --book-accent-hover: var(--jk-accent);
 }
 
 /* Cover the visible viewport when browser chrome or a fold changes the height.
@@ -73,23 +54,11 @@ html[data-theme="dark"]:has(body.booking-page) {
 body.booking-page {
   min-height: 100dvh;
 }
-.booking-page .jk-bg {
-  bottom: -30dvh;
-}
 
 .booking-page .jk-page {
   max-width: 1120px;
   padding-left: max(var(--jk-page-x), env(safe-area-inset-left));
   padding-right: max(var(--jk-page-x), env(safe-area-inset-right));
-}
-
-/* Keep the bar centered, and inset it when a landscape Dynamic Island is only on one side. */
-.booking-page .jk-top {
-  left: env(safe-area-inset-left, 0px);
-  right: env(safe-area-inset-right, 0px);
-  width: min(1180px, calc(100% - env(safe-area-inset-left, 0px) - env(safe-area-inset-right, 0px) - 20px));
-  margin-inline: auto;
-  transform: none;
 }
 
 /* A scheduler title, not a dashboard question. Same scale, lighter weight. */
@@ -132,18 +101,6 @@ body.booking-page {
   display: none !important;
 }
 
-.sr-only {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  padding: 0;
-  margin: -1px;
-  overflow: hidden;
-  clip: rect(0, 0, 0, 0);
-  white-space: nowrap;
-  border: 0;
-}
-
 .skip-link {
   position: fixed;
   z-index: 80;
@@ -165,19 +122,6 @@ body.booking-page {
   outline: 2px solid var(--jk-accent-text);
   outline-offset: 3px;
 }
-.booking-page .jk-thsw button:focus-visible,
-.booking-page .jk-top a:focus-visible {
-  outline: 2px solid var(--jk-accent-text);
-  outline-offset: 2px;
-}
-
-/* Theme switch sits in the top bar. 44 px meets a touch target; 320 px keeps 36 px so the bar still fits. */
-.booking-page .jk-thsw button {
-  min-height: 44px;
-  min-width: 44px;
-  padding: 8px 12px;
-}
-
 .booking-page ::selection {
   background: var(--jk-accent);
   color: var(--on-accent);
@@ -548,7 +492,14 @@ body.booking-page {
 }
 .time-choice.selected {
   background: var(--jk-accent-wash);
+  border: 2px solid var(--jk-ink);
   border-radius: 10px;
+}
+/* Empty speech alternative keeps the visual check out of the accessible name. */
+.time-choice.selected .time-button::after,
+.manage-slots button.selected::after {
+  content: "✓" / "";
+  margin-inline-start: 8px;
 }
 .time-choice.selected .time-button {
   color: var(--jk-ink);
@@ -580,10 +531,6 @@ body.booking-page {
   height: 40px;
   border-radius: var(--jk-r-xs);
   background: var(--jk-hair);
-  animation: book-pulse 1s ease-in-out infinite alternate;
-}
-@keyframes book-pulse {
-  to { opacity: 0.45; }
 }
 
 .inline-status,
@@ -890,6 +837,7 @@ body.booking-page {
   text-transform: none;
 }
 .manage-slots button.selected {
+  border: 2px solid var(--jk-ink);
   background: var(--jk-accent);
   color: var(--on-accent);
   box-shadow: none;
@@ -937,14 +885,6 @@ body.booking-page {
   }
 }
 
-@media (max-width: 359px) {
-  .booking-page .jk-thsw button {
-    min-width: 36px;
-    min-height: 36px;
-    padding: 0 6px;
-  }
-}
-
 /* Short landscape: keep the same controls, with less space above the scheduler. */
 @media (max-height: 500px) {
   .booking-page {
@@ -971,14 +911,6 @@ body.booking-page {
   .weekdays,
   .calendar-grid {
     gap: 1px;
-  }
-}
-
-@media (max-width: 680px) {
-  .booking-page .jk-top {
-    gap: 8px;
-    padding-left: max(12px, env(safe-area-inset-left));
-    padding-right: max(10px, env(safe-area-inset-right));
   }
 }
 
