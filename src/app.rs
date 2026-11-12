@@ -99,7 +99,7 @@ fn merge(a: &Value, b: &Value) -> Value {
     result
 }
 pub fn default_settings() -> Value {
-    json!({"hours":{"start":9,"end":18},"timezone":"Europe/Rome","timezoneSource":"settings","timezoneUpdatedAt":null,"durationMinutes":30,"baseLocation":"","baseLocationProvider":"","baseLocationProviderId":"","baseLocationCoordinates":null,"minimumTravelBufferMinutes":10,"minimumBookingNoticeMinutes":0})
+    json!({"hours":{"start":9,"end":18},"timezone":"Europe/Rome","timezoneSource":"settings","timezoneUpdatedAt":null,"durationMinutes":30,"baseLocation":"","baseLocationProvider":"","baseLocationProviderId":"","baseLocationCoordinates":null,"minimumTravelBufferMinutes":10,"minimumBookingNoticeMinutes":0,"loadMode":w::default_load_mode(),"offCalendarLoad":w::default_off_calendar_load()})
 }
 impl App {
     pub(crate) fn env(&self, k: &str) -> String {
@@ -548,6 +548,7 @@ impl App {
         } else {
             self.db.feedback()?
         };
+        let bookings = self.db.active_bookings()?;
         let mut candidates = vec![];
         let mut origins = vec![];
         for (index, day) in days.iter().enumerate() {
@@ -570,7 +571,7 @@ impl App {
                 .filter(|v| s::overlaps(&da, &db, v))
                 .cloned()
                 .collect();
-            let input = json!({"day":day,"zone":day_zone,"hours":settings["hours"],"busy":day_busy,"events":day_events,"rules":rules,"learning":learning,"weekBusy":context_busy,"weekEvents":context_events,"candidates":preliminary[index]});
+            let input = json!({"day":day,"zone":day_zone,"hours":settings["hours"],"busy":day_busy,"events":day_events,"rules":rules,"learning":learning,"weekBusy":context_busy,"weekEvents":context_events,"weekBookings":bookings,"loadMode":settings["loadMode"],"offCalendarLoad":settings["offCalendarLoad"],"candidates":preliminary[index]});
             let load = w::day(&input)?;
             let arranged = w::arrange(&input)?;
             let ranked = w::rank(
@@ -1161,7 +1162,7 @@ impl App {
                 let n = number(v, k);
                 if n == 0.0 { f } else { n }
             };
-            let settings = merge(
+            let mut settings = merge(
                 &current,
                 &json!({"hours":{"start":n(&input["hours"],"start",9.0).clamp(0.0,23.0),"end":n(&input["hours"],"end",18.0).clamp(1.0,24.0)},"durationMinutes":n(input,"durationMinutes",30.0).clamp(15.0,180.0),"baseLocation":verified["formattedAddress"],"baseLocationProvider":verified["provider"],"baseLocationProviderId":verified["providerId"],"baseLocationCoordinates":verified["location"],"minimumTravelBufferMinutes":n(input,"minimumTravelBufferMinutes",10.0).clamp(0.0,60.0),"minimumBookingNoticeMinutes":notice}),
             );
@@ -1169,6 +1170,17 @@ impl App {
                 number(&settings["hours"], "end") > number(&settings["hours"], "start"),
                 "End hour must be after start hour"
             );
+            settings["loadMode"] = w::normalize_load_mode(if input.get("loadMode").is_some() {
+                &input["loadMode"]
+            } else {
+                &current["loadMode"]
+            })?;
+            settings["offCalendarLoad"] =
+                w::normalize_off_calendar_load(if input.get("offCalendarLoad").is_some() {
+                    &input["offCalendarLoad"]
+                } else {
+                    &current["offCalendarLoad"]
+                })?;
             self.db.put("settings", &settings)?;
             return Ok(response(200, json!({"ok":true,"settings":settings})));
         }
@@ -1827,6 +1839,10 @@ fn evaluate() -> Result<()> {
             )),
             "dayWorkload" => w::day(input)?,
             "arrangeWorkloadSlots" => json!(w::arrange(input)?),
+            "dayWorkloadScore" => w::report(input)?,
+            "previewWorkload" => json!(w::preview(input)?),
+            "normalizeLoadMode" => w::normalize_load_mode(input)?,
+            "normalizeOffCalendarLoad" => w::normalize_off_calendar_load(input)?,
             "rankCandidateSlots" => json!(w::rank(input)?),
             "weeklyDatePreference" => json!(w::preference(input)?),
             "weeklyWorkloadAlert" => w::alert(input)?,
