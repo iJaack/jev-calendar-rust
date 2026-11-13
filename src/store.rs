@@ -373,6 +373,12 @@ CREATE TABLE IF NOT EXISTS booking_slot_outcomes (booking_hash TEXT NOT NULL,sta
         }
         self.get(key)
     }
+    pub fn active_bookings(&self) -> Result<Vec<Value>> {
+        self.query(
+            "SELECT start,end,status,pending_change AS pendingChange FROM bookings WHERE status IN ('pending','confirmed')",
+            &[],
+        )
+    }
     pub fn feedback(&self) -> Result<Vec<Value>> {
         let since = iso(now() - 365 * 86_400_000);
         let mut r=self.query("SELECT start,status AS outcome FROM bookings WHERE status IN ('confirmed','cancelled') AND created_at>=?",&[&since])?;

@@ -117,8 +117,71 @@ try {
   $('min-buffer').value = settings.minimumTravelBufferMinutes;
   $('min-notice-hours').value = (settings.minimumBookingNoticeMinutes || 0) / 60;
   $('current-timezone').textContent = `${(settings.timezone || detectedTimeZone()).replaceAll('_', ' ')} · ${settings.timezoneSource || 'saved'}`;
+  fillLoadSettings(settings);
   await syncTimeZone();
 } catch (error) { message(error.message, true); }
+
+
+function fillLoadSettings(settings) {
+  const mode = settings.loadMode || {};
+  const tiers = mode.tiers || {};
+  $('load-mode').value = mode.mode || 'ultraHeavy';
+  $('load-mode-until').value = mode.until || '';
+  $('heavy-max-day').value = tiers.heavy?.maxPerDay ?? 2;
+  $('heavy-max-week').value = tiers.heavy?.maxPerWeek ?? 6;
+  $('ultra-max-day').value = tiers.ultraHeavy?.maxPerDay ?? 1;
+  $('ultra-max-week').value = tiers.ultraHeavy?.maxPerWeek ?? 3;
+  const off = settings.offCalendarLoad || {};
+  $('off-calendar-weekly').value = off.weeklyMinutes ?? 0;
+  const lines = [];
+  for (const [day, minutes] of Object.entries(off.byDate || {})) lines.push(`${day} ${minutes}`);
+  for (const [day, minutes] of Object.entries(off.byWeek || {})) lines.push(`week ${day} ${minutes}`);
+  $('off-calendar-extra').value = lines.join('\n');
+}
+function parseOffCalendarExtra(text) {
+  const byDate = {}, byWeek = {};
+  for (const raw of text.split(/\n+/)) {
+    const line = raw.trim();
+    if (!line) continue;
+    const week = /^week\s+(\d{4}-\d{2}-\d{2})\s+(\d+(?:\.\d+)?)$/i.exec(line);
+    const date = /^(\d{4}-\d{2}-\d{2})\s+(\d+(?:\.\d+)?)$/.exec(line);
+    if (week) byWeek[week[1]] = Number(week[2]);
+    else if (date) byDate[date[1]] = Number(date[2]);
+    else throw new Error('Use lines like 2026-11-16 120 or week 2026-11-16 300');
+  }
+  return { byDate, byWeek };
+}
+function loadModeMessage(text, error = false) {
+  $('load-mode-status').textContent = text;
+  $('load-mode-status').className = `status${error ? ' error' : ''}`;
+}
+$('load-mode-form').addEventListener('submit', async (event) => {
+  event.preventDefault();
+  try {
+    const current = await request('/api/settings');
+    const extra = parseOffCalendarExtra($('off-calendar-extra').value);
+    const body = {
+      baseLocation: current.baseLocation || '',
+      baseLocationProviderId: current.baseLocationProviderId || '',
+      hours: current.hours,
+      durationMinutes: current.durationMinutes,
+      minimumTravelBufferMinutes: current.minimumTravelBufferMinutes,
+      minimumBookingNoticeMinutes: current.minimumBookingNoticeMinutes,
+      loadMode: {
+        mode: $('load-mode').value,
+        until: $('load-mode-until').value || null,
+        tiers: {
+          heavy: { maxPerDay: Number($('heavy-max-day').value), maxPerWeek: Number($('heavy-max-week').value) },
+          ultraHeavy: { maxPerDay: Number($('ultra-max-day').value), maxPerWeek: Number($('ultra-max-week').value) }
+        }
+      },
+      offCalendarLoad: { weeklyMinutes: Number($('off-calendar-weekly').value), byDate: extra.byDate, byWeek: extra.byWeek }
+    };
+    const result = await request('/api/settings', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    fillLoadSettings(result.settings);
+    loadModeMessage('Load settings saved. New availability previews will use them.');
+  } catch (error) { loadModeMessage(error.message, true); }
+});
 
 $('settings-form').addEventListener('submit', async (event) => {
   event.preventDefault();

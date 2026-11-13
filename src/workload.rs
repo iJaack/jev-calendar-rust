@@ -220,86 +220,586 @@ fn edges(mut c: Vec<Value>, count: usize) -> Vec<Value> {
         vec![c[0].clone(), c.last().expect("nonempty").clone()]
     }
 }
+
+pub fn default_load_mode() -> Value {
+    json!({
+        "mode": "ultraHeavy",
+        "until": Value::Null,
+        "tiers": {
+            "heavy": {"maxPerDay": 2, "maxPerWeek": 6},
+            "ultraHeavy": {"maxPerDay": 1, "maxPerWeek": 3}
+        }
+    })
+}
+
+pub fn default_off_calendar_load() -> Value {
+    json!({"weeklyMinutes": 0, "byDate": {}, "byWeek": {}})
+}
+
+fn is_date_key(s: &str) -> bool {
+    chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d").is_ok()
+}
+
+fn whole_cap(v: &Value, key: &str, default: i64, max: i64) -> Result<i64> {
+    let raw = v.get(key).unwrap_or(&Value::Null);
+    let n = if raw.is_null() {
+        default
+    } else {
+        raw.as_i64()
+            .or_else(|| {
+                raw.as_f64()
+                    .and_then(|f| (f.fract() == 0.0).then_some(f as i64))
+            })
+            .ok_or_else(|| anyhow::anyhow!("Load caps must be whole numbers"))?
+    };
+    ensure!(
+        (0..=max).contains(&n),
+        "Load caps must be between 0 and {max}"
+    );
+    Ok(n)
+}
+
+pub fn normalize_load_mode(v: &Value) -> Result<Value> {
+    let defaults = default_load_mode();
+    if v.is_null() {
+        return Ok(defaults);
+    }
+    let mode = if let Some(s) = v.as_str() {
+        s.to_owned()
+    } else {
+        let m = text(v, "mode");
+        if m.is_empty() {
+            text(&defaults, "mode")
+        } else {
+            m
+        }
+    };
+    ensure!(
+        matches!(mode.as_str(), "normal" | "heavy" | "ultraHeavy"),
+        "Load mode must be normal, heavy, or ultraHeavy"
+    );
+    let until = if v.is_string() {
+        Value::Null
+    } else if v["until"].is_null() || text(v, "until").is_empty() {
+        Value::Null
+    } else {
+        let u = text(v, "until");
+        ensure!(is_date_key(&u), "Load mode until date must be YYYY-MM-DD");
+        json!(u)
+    };
+    let src_tiers = if v.is_object() {
+        &v["tiers"]
+    } else {
+        &Value::Null
+    };
+    let mut tiers = json!({});
+    for (name, def_day, def_week) in [("heavy", 2i64, 6i64), ("ultraHeavy", 1, 3)] {
+        let src = if src_tiers[name].is_object() {
+            &src_tiers[name]
+        } else {
+            &defaults["tiers"][name]
+        };
+        tiers[name] = json!({
+            "maxPerDay": whole_cap(src, "maxPerDay", def_day, 24)?,
+            "maxPerWeek": whole_cap(src, "maxPerWeek", def_week, 120)?
+        });
+    }
+    Ok(json!({"mode": mode, "until": until, "tiers": tiers}))
+}
+
+pub fn normalize_off_calendar_load(v: &Value) -> Result<Value> {
+    if v.is_null() {
+        return Ok(default_off_calendar_load());
+    }
+    if let Some(n) = v.as_f64() {
+        ensure!(
+            (0.0..=10_000.0).contains(&n),
+            "Off-calendar load must be between 0 and 10000 minutes"
+        );
+        return Ok(json!({"weeklyMinutes": n, "byDate": {}, "byWeek": {}}));
+    }
+    let weekly = v["weeklyMinutes"].as_f64().unwrap_or(0.0);
+    ensure!(
+        (0.0..=10_000.0).contains(&weekly),
+        "Off-calendar load must be between 0 and 10000 minutes"
+    );
+    Ok(json!({
+        "weeklyMinutes": weekly,
+        "byDate": minute_map(&v["byDate"], false)?,
+        "byWeek": minute_map(&v["byWeek"], true)?
+    }))
+}
+
+fn minute_map(v: &Value, as_week: bool) -> Result<Value> {
+    if v.is_null() {
+        return Ok(json!({}));
+    }
+    let obj = v
+        .as_object()
+        .ok_or_else(|| anyhow::anyhow!("Off-calendar entries must be a date map"))?;
+    ensure!(obj.len() <= 400, "Use at most 400 off-calendar entries");
+    let mut out = serde_json::Map::new();
+    for (k, val) in obj {
+        ensure!(is_date_key(k), "Off-calendar keys must be YYYY-MM-DD");
+        let key = if as_week { s::monday(k)? } else { k.clone() };
+        let n = val
+            .as_f64()
+            .ok_or_else(|| anyhow::anyhow!("Off-calendar minutes must be a number"))?;
+        ensure!(
+            (0.0..=10_000.0).contains(&n),
+            "Off-calendar load must be between 0 and 10000 minutes"
+        );
+        let prev = out.get(&key).and_then(|x| x.as_f64()).unwrap_or(0.0);
+        out.insert(key, json!(prev + n));
+    }
+    Ok(Value::Object(out))
+}
+
+pub fn off_calendar_minutes(load: &Value, day: &str) -> Result<f64> {
+    let load = normalize_off_calendar_load(load)?;
+    let weekday = s::weekday(day)? % 6 != 0;
+    let monday = s::monday(day)?;
+    let weekly = load["weeklyMinutes"].as_f64().unwrap_or(0.0);
+    let week = load["byWeek"][&monday].as_f64().unwrap_or(0.0);
+    let date = load["byDate"][day].as_f64().unwrap_or(0.0);
+    let spread = if weekday { (weekly + week) / 5.0 } else { 0.0 };
+    Ok(spread + date)
+}
+
+fn active_caps(load_mode: &Value, day: &str) -> Result<(String, Option<(i64, i64)>)> {
+    let mode = normalize_load_mode(load_mode)?;
+    let name = text(&mode, "mode");
+    let until = text(&mode, "until");
+    if name == "normal" || (!until.is_empty() && day > until.as_str()) {
+        return Ok(("normal".into(), None));
+    }
+    let caps = &mode["tiers"][&name];
+    Ok((
+        name,
+        Some((
+            caps["maxPerDay"].as_i64().unwrap_or(0),
+            caps["maxPerWeek"].as_i64().unwrap_or(0),
+        )),
+    ))
+}
+
+fn event_day(event: &Value, zone: &str) -> Option<String> {
+    let start = text(event, "start");
+    if let Some(ms) = epoch(&start) {
+        return s::date(ms, zone).ok();
+    }
+    let day = start.chars().take(10).collect::<String>();
+    is_date_key(&day).then_some(day)
+}
+
+fn overlaps_window(event: &Value, day: &str, zone: &str, start_hour: f64, end_hour: f64) -> bool {
+    let (Ok(a), Ok(b)) = (
+        s::zoned(day, start_hour, zone),
+        s::zoned(day, end_hour, zone),
+    ) else {
+        return false;
+    };
+    match (epoch(&text(event, "start")), epoch(&text(event, "end"))) {
+        (Some(x), Some(y)) => a < y && b > x,
+        _ => event_day(event, zone).as_deref() == Some(day),
+    }
+}
+
+fn event_fallback(event: &Value, rules: &[Value]) -> String {
+    project(event, rules)
+        .map(|r| text(r, "type"))
+        .unwrap_or_default()
+}
+
+fn is_call(event: &Value, rules: &[Value]) -> bool {
+    kind(event, &event_fallback(event, rules)) == "meetings"
+}
+
+fn is_deadline_event(event: &Value, rules: &[Value]) -> bool {
+    kind(event, &event_fallback(event, rules)) == "deadline"
+}
+
+fn effective_in_person(event: &Value) -> bool {
+    let loc = text(event, "location");
+    if !loc.is_empty() {
+        return crate::providers::physical(&loc);
+    }
+    event["inPerson"] == true
+}
+
+fn is_training_or_sport(event: &Value) -> bool {
+    let cal = text(event, "calendarName").to_lowercase();
+    if cal.contains("training") {
+        return true;
+    }
+    let hay = format!(
+        "{} {}",
+        text(event, "summary").to_lowercase(),
+        text(event, "location").to_lowercase()
+    );
+    static SPORT: LazyLock<regex::Regex> = LazyLock::new(|| {
+        regex::Regex::new(r"(?i)\b(?:gym|palestra|tennis|corsa|running|\brun\b|runs|stretching|fitness|workout|yoga|pilates|sporting\s+club)\b")
+        .expect("static regex")
+    });
+    SPORT.is_match(&hay)
+}
+
+fn is_trip(event: &Value) -> bool {
+    if is_training_or_sport(event) {
+        return false;
+    }
+    let cal = text(event, "calendarName").to_lowercase();
+    let id = text(event, "calendarId").to_lowercase();
+    if cal.contains("tripit") || id.contains("tripit") || id.contains("synthetic-travel") {
+        return true;
+    }
+    let hay = format!(
+        "{} {}",
+        text(event, "summary").to_lowercase(),
+        text(event, "location").to_lowercase()
+    );
+    static TRIP: LazyLock<regex::Regex> = LazyLock::new(|| {
+        regex::Regex::new(r"(?i)\b(?:flight|airport|depart(?:ure)?|arrival|hotel|tripit)\b")
+            .expect("static regex")
+    });
+    TRIP.is_match(&hay)
+}
+
+fn work_hours_travel_or_in_person_work(
+    event: &Value,
+    day: &str,
+    zone: &str,
+    start_h: f64,
+    end_h: f64,
+) -> bool {
+    if !overlaps_window(event, day, zone, start_h, end_h) {
+        return false;
+    }
+    if is_training_or_sport(event) {
+        return false;
+    }
+    is_trip(event) || effective_in_person(event)
+}
+
+fn band_of(score: i64) -> (&'static str, usize) {
+    if score <= 30 {
+        ("light", 4)
+    } else if score <= 55 {
+        ("normal", 2)
+    } else if score <= 75 {
+        ("busy", 1)
+    } else {
+        ("heavy", 0)
+    }
+}
+
+fn context_events(v: &Value) -> Vec<Value> {
+    if v["weekEvents"].is_array() {
+        array(&v["weekEvents"])
+    } else {
+        array(&v["events"])
+    }
+}
+
+fn context_busy(v: &Value) -> Value {
+    if v["weekBusy"].is_array() {
+        v["weekBusy"].clone()
+    } else {
+        v["busy"].clone()
+    }
+}
+
+fn score_input(v: &Value, day: &str) -> Value {
+    let mut input = v.clone();
+    input["day"] = json!(day);
+    input["events"] = json!(context_events(v));
+    input["busy"] = context_busy(v);
+    input
+}
+
+pub fn score_components(v: &Value) -> Result<Value> {
+    let day_key = text(v, "day");
+    let zone = text(v, "zone");
+    let start_h = number(&v["hours"], "start");
+    let end_h = number(&v["hours"], "end");
+    let capacity = ((end_h - start_h) * 60.0).max(0.0);
+    let input = score_input(v, &day_key);
+    let load = day(&input)?;
+    let booked = number(&load, "busyMinutes");
+    let off = off_calendar_minutes(&v["offCalendarLoad"], &day_key)?;
+    let loaded = booked + off;
+    let booked_score = if capacity <= 0.0 {
+        if loaded > 0.0 { 40.0 } else { 0.0 }
+    } else {
+        (40.0 * (loaded / capacity)).min(40.0)
+    };
+    let rules = array(&v["rules"]);
+    let events = context_events(v);
+    let call_count = events
+        .iter()
+        .filter(|e| overlaps_window(e, &day_key, &zone, start_h, end_h) && is_call(e, &rules))
+        .count();
+    let call_score = ((call_count as i64) * 5).min(20) as f64;
+    let project_count = load["projects"].as_object().map(|p| p.len()).unwrap_or(0);
+    let switch_score = (project_count.saturating_sub(1) * 5).min(15) as f64;
+    let closes = events
+        .iter()
+        .any(|e| work_hours_travel_or_in_person_work(e, &day_key, &zone, start_h, end_h));
+    let travel_score = if closes { 15.0 } else { 0.0 };
+    let in_person = closes;
+    let tomorrow = s::shift(&day_key, 1)?;
+    let deadline_count = events
+        .iter()
+        .filter(|e| {
+            is_deadline_event(e, &rules)
+                && event_day(e, &zone).is_some_and(|d| d == day_key || d == tomorrow)
+        })
+        .count();
+    let deadline_score = ((deadline_count as i64) * 5).min(10) as f64;
+    let raw = booked_score + call_score + switch_score + travel_score + deadline_score;
+    let score = raw.clamp(0.0, 100.0).round() as i64;
+    let (band, natural) = band_of(score);
+    let band_slots = if in_person { 0 } else { natural };
+    Ok(json!({
+        "day": day_key,
+        "score": score,
+        "rawScore": raw,
+        "band": band,
+        "bandSlots": band_slots,
+        "inPerson": in_person,
+        "drivers": {
+            "bookedMinutes": booked,
+            "offCalendarMinutes": off,
+            "capacityMinutes": capacity,
+            "bookedTime": booked_score,
+            "callCount": call_count,
+            "calls": call_score,
+            "projectCount": project_count,
+            "projectSwitches": switch_score,
+            "travelOrInPerson": travel_score,
+            "deadlineCount": deadline_count,
+            "deadlines": deadline_score
+        }
+    }))
+}
+
+fn booking_day(b: &Value, zone: &str) -> Option<String> {
+    let start = if !text(&b["pendingChange"], "start").is_empty() {
+        text(&b["pendingChange"], "start")
+    } else {
+        text(b, "start")
+    };
+    if let Some(ms) = epoch(&start) {
+        return s::date(ms, zone).ok();
+    }
+    let day = start.chars().take(10).collect::<String>();
+    is_date_key(&day).then_some(day)
+}
+
+pub fn week_bookings_count(v: &Value, monday: &str, zone: &str) -> Result<i64> {
+    let friday = s::shift(monday, 4)?;
+    let mut n = 0;
+    for b in array(&v["weekBookings"]) {
+        let status = text(&b, "status");
+        if !status.is_empty() && status != "pending" && status != "confirmed" {
+            continue;
+        }
+        if let Some(d) = booking_day(&b, zone) {
+            if d.as_str() >= monday && d.as_str() <= friday.as_str() && s::weekday(&d)? % 6 != 0 {
+                n += 1;
+            }
+        }
+    }
+    Ok(n)
+}
+
+pub fn week_plan(v: &Value) -> Result<Vec<Value>> {
+    let monday = s::monday(&text(v, "day"))?;
+    let zone = text(v, "zone");
+    let bookings = week_bookings_count(v, &monday, &zone)?;
+    let mut days = vec![];
+    for n in 0..5 {
+        let d = s::shift(&monday, n)?;
+        let report = score_components(&score_input(v, &d))?;
+        let (mode, caps) = active_caps(&v["loadMode"], &d)?;
+        days.push((d, report, mode, caps));
+    }
+    let mut offered = vec![0i64; days.len()];
+    for (i, (_, report, _, caps)) in days.iter().enumerate() {
+        if caps.is_none() {
+            offered[i] = report["bandSlots"].as_i64().unwrap_or(0);
+        }
+    }
+    let mut order: Vec<usize> = (0..days.len()).collect();
+    order.sort_by(|&a, &b| {
+        let sa = days[a].1["score"].as_i64().unwrap_or(0);
+        let sb = days[b].1["score"].as_i64().unwrap_or(0);
+        sa.cmp(&sb).then_with(|| days[a].0.cmp(&days[b].0))
+    });
+    let mut already = 0i64;
+    for i in order {
+        if let Some((max_day, max_week)) = days[i].3 {
+            let band = days[i].1["bandSlots"].as_i64().unwrap_or(0);
+            let remaining = (max_week - bookings - already).max(0);
+            let o = band.min(max_day).min(remaining).max(0);
+            offered[i] = o;
+            already += o;
+        }
+    }
+    let mut rows = vec![];
+    for (i, (d, report, mode, _)) in days.into_iter().enumerate() {
+        rows.push(json!({
+            "day": d,
+            "score": report["score"],
+            "rawScore": report["rawScore"],
+            "band": report["band"],
+            "bandSlots": report["bandSlots"],
+            "offeredSlots": offered[i],
+            "mode": mode,
+            "inPerson": report["inPerson"],
+            "weekBookings": bookings,
+            "drivers": report["drivers"]
+        }));
+    }
+    Ok(rows)
+}
+
+pub fn report(v: &Value) -> Result<Value> {
+    let day = text(v, "day");
+    week_plan(v)?
+        .into_iter()
+        .find(|r| text(r, "day") == day)
+        .ok_or_else(|| anyhow::anyhow!("Score is only computed for Monday to Friday"))
+}
+
+pub fn offered_slots(v: &Value) -> Result<usize> {
+    if s::weekday(&text(v, "day"))? % 6 == 0 {
+        return Ok(0);
+    }
+    Ok(report(v)?["offeredSlots"].as_u64().unwrap_or(0) as usize)
+}
+
+fn driver_summary(r: &Value) -> String {
+    let d = &r["drivers"];
+    let mut parts = vec![format!(
+        "booked time {:.1} ({}+{:.0}/{:.0} min)",
+        d["bookedTime"].as_f64().unwrap_or(0.0),
+        d["bookedMinutes"].as_f64().unwrap_or(0.0),
+        d["offCalendarMinutes"].as_f64().unwrap_or(0.0),
+        d["capacityMinutes"].as_f64().unwrap_or(0.0)
+    )];
+    let calls = d["callCount"].as_u64().unwrap_or(0);
+    if calls > 0 {
+        parts.push(format!(
+            "{calls} calls {}",
+            d["calls"].as_f64().unwrap_or(0.0)
+        ));
+    }
+    let projects = d["projectCount"].as_u64().unwrap_or(0);
+    if projects > 1 {
+        parts.push(format!(
+            "{} project switches {}",
+            projects - 1,
+            d["projectSwitches"].as_f64().unwrap_or(0.0)
+        ));
+    }
+    if d["travelOrInPerson"].as_f64().unwrap_or(0.0) > 0.0 {
+        parts.push(format!(
+            "travel or in-person {}",
+            d["travelOrInPerson"].as_f64().unwrap_or(0.0)
+        ));
+    }
+    let deadlines = d["deadlineCount"].as_u64().unwrap_or(0);
+    if deadlines > 0 {
+        parts.push(format!(
+            "{deadlines} deadlines {}",
+            d["deadlines"].as_f64().unwrap_or(0.0)
+        ));
+    }
+    if r["inPerson"] == true {
+        parts.push("in-person forces 0 slots".into());
+    }
+    parts.join("; ")
+}
+
+pub fn preview(v: &Value) -> Result<Vec<Value>> {
+    let mut rows = vec![];
+    for d in array(&v["days"]) {
+        let day = d.as_str().unwrap_or("").to_owned();
+        ensure!(is_date_key(&day), "Preview days must be YYYY-MM-DD");
+        let mut input = v.clone();
+        input["day"] = json!(day);
+        if s::weekday(&day)? % 6 == 0 {
+            rows.push(json!({
+                "date": day,
+                "score": 0,
+                "band": "light",
+                "slots": 0,
+                "drivers": "weekend",
+                "mode": "normal",
+                "inPerson": false,
+                "weekBookings": 0
+            }));
+            continue;
+        }
+        let r = report(&input)?;
+        rows.push(json!({
+            "date": day,
+            "score": r["score"],
+            "band": r["band"],
+            "slots": r["offeredSlots"],
+            "drivers": driver_summary(&r),
+            "driverParts": r["drivers"],
+            "mode": r["mode"],
+            "inPerson": r["inPerson"],
+            "weekBookings": r["weekBookings"],
+            "bandSlots": r["bandSlots"]
+        }));
+    }
+    Ok(rows)
+}
+
 pub fn arrange(v: &Value) -> Result<Vec<Value>> {
     let mut c = array(&v["candidates"]);
     if c.is_empty() {
         return Ok(c);
     }
+    let offered = offered_slots(v)?;
+    if offered == 0 {
+        return Ok(vec![]);
+    }
+    if c.len() <= offered {
+        return Ok(c);
+    }
     let load = day(v)?;
     let t = types(&load);
-    let span = (number(&v["hours"], "end") - number(&v["hours"], "start")) * 60.0;
-    let baseline = number(&v["learning"], "baselineBusyMinutes");
-    let spike = load["projects"].as_object().is_some_and(|p| {
-        p.iter().any(|(n, p)| {
-            number(p, "minutes")
-                >= 120.0f64.max(
-                    v["learning"]["typicalProjectMinutes"][n]
-                        .as_f64()
-                        .unwrap_or(0.0)
-                        * 1.5,
-                )
-        })
-    });
-    let heavy = number(&load, "busyMinutes") >= 180.0f64.max((span * 0.6).min(baseline * 1.25))
-        || (spike && number(&load, "busyMinutes") >= 120.0);
-    if heavy {
-        if number(&t, "deadline") >= 120.0 {
-            return Ok(vec![]);
-        }
-        let count = if number(&load, "busyMinutes") >= span * 0.65 {
-            1
-        } else {
-            2
-        };
-        let mut dominant = "meetings";
-        for k in ["meetings", "focus", "deadline"] {
-            if number(&t, k) > number(&t, dominant) {
-                dominant = k
-            }
-        }
-        if number(&t, dominant) < 60.0f64.max(number(&load, "busyMinutes") * 0.4) {
-            dominant = "meetings"
-        }
-        if dominant == "focus" {
-            c = edges(c, count)
-        } else {
-            let busy = clip(&array(&v["busy"]), bounds(v)?);
-            let distance = |slot: &Value| {
-                let a = epoch(&text(slot, "start")).unwrap_or(0);
-                let b = epoch(&text(slot, "end")).unwrap_or(0);
-                busy.iter()
-                    .map(|(x, y)| (a - y).abs().min((x - b).abs()))
-                    .min()
-                    .unwrap_or(0)
-            };
-            c.sort_by_key(|s| (distance(s), epoch(&text(s, "start"))));
-            c.truncate(count);
-            c.sort_by_key(|s| epoch(&text(s, "start")));
+    let mut dominant = "meetings";
+    for k in ["meetings", "focus", "deadline"] {
+        if number(&t, k) > number(&t, dominant) {
+            dominant = k
         }
     }
-    let mut context = v.clone();
-    if v["weekEvents"].is_array() {
-        context["events"] = v["weekEvents"].clone()
+    if number(&t, dominant) < 60.0f64.max(number(&load, "busyMinutes") * 0.4) {
+        dominant = "meetings"
     }
-    if v["weekBusy"].is_array() {
-        context["busy"] = v["weekBusy"].clone()
+    if dominant == "focus" {
+        return Ok(edges(c, offered));
     }
-    match deadline(&context)? {
-        Some(0) => return Ok(vec![]),
-        Some(1) => return Ok(edges(c, 1)),
-        Some(2) => return Ok(edges(c, 2)),
-        _ => (),
+    let busy = clip(&array(&v["busy"]), bounds(v)?);
+    let distance = |slot: &Value| {
+        let a = epoch(&text(slot, "start")).unwrap_or(0);
+        let b = epoch(&text(slot, "end")).unwrap_or(0);
+        busy.iter()
+            .map(|(x, y)| (a - y).abs().min((x - b).abs()))
+            .min()
+            .unwrap_or(0)
     };
-    let elsewhere = week(&context)?
-        .iter()
-        .any(|x| x["day"] != v["day"] && meeting(x));
-    if number(&t, "focus") >= 90.0
-        || (elsewhere && number(&t, "meetings") < 30.0 && number(&load, "meetings") < 2.0)
-    {
-        return Ok(edges(c, 2));
-    }
+    c.sort_by_key(|s| (distance(s), epoch(&text(s, "start"))));
+    c.truncate(offered);
+    c.sort_by_key(|s| epoch(&text(s, "start")));
     Ok(c)
 }
+
 pub fn rank(v: &Value) -> Result<Vec<Value>> {
     let zone = text(v, "zone");
     let mut history: HashMap<String, (f64, f64)> = HashMap::new();
@@ -429,4 +929,554 @@ pub fn alert(v: &Value) -> Result<Value> {
     Ok(
         json!({"heavyDays":heavy,"busyMinutes":busy,"typicalBusyMinutes":baseline*loads.len()as f64,"typeMinutes":t,"suggestion":suggestion}),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::iso;
+
+    const ZONE: &str = "Europe/Rome";
+    const MON: &str = "2026-11-16";
+    const TUE: &str = "2026-11-17";
+    const WED: &str = "2026-11-18";
+    const THU: &str = "2026-11-19";
+    const FRI: &str = "2026-11-20";
+
+    fn rules() -> Value {
+        json!([
+            {"name":"Alpha","type":"meetings","keywords":["alpha"],"calendarIds":[]},
+            {"name":"Beta","type":"focus","keywords":["beta"],"calendarIds":[]},
+            {"name":"Gamma","type":"deadline","keywords":["gamma"],"calendarIds":[]},
+            {"name":"Delta","type":"focus","keywords":["delta"],"calendarIds":[]}
+        ])
+    }
+
+    fn ts(day: &str, hour: f64) -> String {
+        iso(s::zoned(day, hour, ZONE).unwrap())
+    }
+
+    fn ev(day: &str, start: f64, end: f64, summary: &str) -> Value {
+        json!({
+            "start": ts(day, start),
+            "end": ts(day, end),
+            "summary": summary,
+            "inPerson": false
+        })
+    }
+
+    fn in_person(day: &str, start: f64, end: f64, summary: &str) -> Value {
+        let mut e = ev(day, start, end, summary);
+        e["inPerson"] = json!(true);
+        e["location"] = json!("Via del Corso 1, Rome");
+        e["calendarName"] = json!("Work");
+        e
+    }
+
+    fn training(day: &str, start: f64, end: f64, summary: &str) -> Value {
+        let mut e = in_person(day, start, end, summary);
+        e["calendarName"] = json!("Training");
+        e["location"] = json!("Italiana Fitness Nomentana, Via Emanuele Ciaceri 37, Roma");
+        e
+    }
+
+    fn cands(day: &str, n: usize) -> Vec<Value> {
+        (0..n)
+            .map(|i| {
+                let start = 9.0 + i as f64 * 0.5;
+                json!({"start": ts(day, start), "end": ts(day, start + 0.5)})
+            })
+            .collect()
+    }
+
+    fn base(day: &str, mode: &str) -> Value {
+        json!({
+            "day": day,
+            "zone": ZONE,
+            "hours": {"start": 9, "end": 18},
+            "busy": [],
+            "events": [],
+            "weekEvents": [],
+            "weekBusy": [],
+            "weekBookings": [],
+            "rules": rules(),
+            "candidates": cands(day, 8),
+            "loadMode": {"mode": mode},
+            "offCalendarLoad": {"weeklyMinutes": 0, "byDate": {}, "byWeek": {}}
+        })
+    }
+
+    fn with_events(mut v: Value, events: Vec<Value>) -> Value {
+        let busy: Vec<Value> = events
+            .iter()
+            .map(|e| json!({"start": e["start"], "end": e["end"]}))
+            .collect();
+        v["events"] = json!(events.clone());
+        v["weekEvents"] = json!(events);
+        v["busy"] = json!(busy.clone());
+        v["weekBusy"] = json!(busy);
+        v
+    }
+
+    fn booking(day: &str, hour: f64, status: &str) -> Value {
+        json!({"start": ts(day, hour), "end": ts(day, hour + 0.5), "status": status})
+    }
+
+    fn scored(v: &Value) -> Value {
+        report(v).unwrap()
+    }
+
+    #[test]
+    fn empty_day_is_light_four_slots_in_normal_mode() {
+        let v = base(WED, "normal");
+        let r = scored(&v);
+        assert_eq!(r["score"], 0);
+        assert_eq!(r["band"], "light");
+        assert_eq!(r["bandSlots"], 4);
+        assert_eq!(r["offeredSlots"], 4);
+        assert_eq!(arrange(&v).unwrap().len(), 4);
+    }
+
+    #[test]
+    fn default_and_ultra_heavy_cap_one_per_day() {
+        let v = base(WED, "ultraHeavy");
+        let r = scored(&v);
+        assert_eq!(r["bandSlots"], 4);
+        assert_eq!(r["offeredSlots"], 1);
+        assert_eq!(r["mode"], "ultraHeavy");
+        assert_eq!(arrange(&v).unwrap().len(), 1);
+        let defaulted = {
+            let mut x = v.clone();
+            x["loadMode"] = Value::Null;
+            scored(&x)
+        };
+        assert_eq!(defaulted["mode"], "ultraHeavy");
+        assert_eq!(defaulted["offeredSlots"], 1);
+    }
+
+    #[test]
+    fn heavy_caps_two_per_day_even_when_band_is_four() {
+        let v = base(WED, "heavy");
+        let r = scored(&v);
+        assert_eq!(r["bandSlots"], 4);
+        assert_eq!(r["offeredSlots"], 2);
+        assert_eq!(arrange(&v).unwrap().len(), 2);
+    }
+
+    #[test]
+    fn ultra_heavy_week_cap_distributes_three_days() {
+        let v = base(MON, "ultraHeavy");
+        let plan = week_plan(&v).unwrap();
+        let offered: Vec<i64> = plan
+            .iter()
+            .map(|r| r["offeredSlots"].as_i64().unwrap())
+            .collect();
+        assert_eq!(offered, vec![1, 1, 1, 0, 0]);
+    }
+
+    #[test]
+    fn heavy_week_cap_stops_at_six() {
+        let v = base(MON, "heavy");
+        let plan = week_plan(&v).unwrap();
+        let offered: Vec<i64> = plan
+            .iter()
+            .map(|r| r["offeredSlots"].as_i64().unwrap())
+            .collect();
+        // 2 per day, 6 per week: Mon-Wed get 2, Thu-Fri get 0
+        assert_eq!(offered, vec![2, 2, 2, 0, 0]);
+    }
+
+    #[test]
+    fn week_cap_counts_confirmed_and_pending_bookings() {
+        let mut v = base(MON, "ultraHeavy");
+        v["weekBookings"] = json!([
+            booking(MON, 10.0, "confirmed"),
+            booking(TUE, 11.0, "pending"),
+            booking(WED, 9.0, "cancelled")
+        ]);
+        let plan = week_plan(&v).unwrap();
+        let offered: Vec<i64> = plan
+            .iter()
+            .map(|r| r["offeredSlots"].as_i64().unwrap())
+            .collect();
+        // 2 active bookings, max 3: one slot left, on Monday
+        assert_eq!(plan[0]["weekBookings"], 2);
+        assert_eq!(offered, vec![1, 0, 0, 0, 0]);
+        // three already booked: nothing offered
+        v["weekBookings"] = json!([
+            booking(MON, 10.0, "confirmed"),
+            booking(TUE, 11.0, "pending"),
+            booking(FRI, 14.0, "confirmed")
+        ]);
+        let plan = week_plan(&v).unwrap();
+        assert!(plan.iter().all(|r| r["offeredSlots"] == 0));
+    }
+
+    #[test]
+    fn configurable_tier_caps() {
+        let mut v = base(MON, "ultraHeavy");
+        v["loadMode"] = json!({
+            "mode": "ultraHeavy",
+            "tiers": {"ultraHeavy": {"maxPerDay": 2, "maxPerWeek": 5}}
+        });
+        let offered: Vec<i64> = week_plan(&v)
+            .unwrap()
+            .iter()
+            .map(|r| r["offeredSlots"].as_i64().unwrap())
+            .collect();
+        // band 4, day cap 2, week 5: 2+2+1+0+0
+        assert_eq!(offered, vec![2, 2, 1, 0, 0]);
+    }
+
+    #[test]
+    fn until_date_is_inclusive_then_reverts_to_normal() {
+        let mut v = base(WED, "ultraHeavy");
+        v["loadMode"] = json!({"mode": "ultraHeavy", "until": WED});
+        assert_eq!(scored(&v)["mode"], "ultraHeavy");
+        assert_eq!(scored(&v)["offeredSlots"], 1);
+        v["day"] = json!(THU);
+        v["candidates"] = json!(cands(THU, 8));
+        assert_eq!(scored(&v)["mode"], "normal");
+        assert_eq!(scored(&v)["offeredSlots"], 4);
+    }
+
+    #[test]
+    fn booked_time_is_linear_against_workday_capacity() {
+        // 270 of 540 minutes = 20 points
+        let events = vec![ev(WED, 9.0, 13.5, "focus block")];
+        let v = with_events(base(WED, "normal"), events);
+        let r = scored(&v);
+        assert_eq!(r["drivers"]["bookedMinutes"], 270.0);
+        assert_eq!(r["drivers"]["capacityMinutes"], 540.0);
+        assert_eq!(r["drivers"]["bookedTime"], 20.0);
+        assert_eq!(r["score"], 20);
+        assert_eq!(r["band"], "light");
+    }
+
+    #[test]
+    fn off_calendar_weekly_minutes_spread_over_weekdays() {
+        let mut v = base(WED, "normal");
+        v["offCalendarLoad"] = json!({"weeklyMinutes": 2700, "byDate": {}, "byWeek": {}});
+        // 2700/5 = 540, fills the day: 40 points
+        let r = scored(&v);
+        assert_eq!(r["drivers"]["offCalendarMinutes"], 540.0);
+        assert_eq!(r["drivers"]["bookedTime"], 40.0);
+        assert_eq!(r["score"], 40);
+        assert_eq!(r["band"], "normal");
+        // weekend gets no weekly spread
+        assert_eq!(
+            off_calendar_minutes(&v["offCalendarLoad"], "2026-11-21").unwrap(),
+            0.0
+        );
+    }
+
+    #[test]
+    fn off_calendar_by_date_and_by_week_add() {
+        let mut v = base(WED, "normal");
+        v["offCalendarLoad"] = json!({
+            "weeklyMinutes": 0,
+            "byDate": {WED: 108},
+            "byWeek": {MON: 540}
+        });
+        // week 540/5=108, plus 108 date = 216; 40*216/540=16
+        let r = scored(&v);
+        assert_eq!(r["drivers"]["offCalendarMinutes"], 216.0);
+        assert_eq!(r["drivers"]["bookedTime"], 16.0);
+        // another weekday only gets the weekly share
+        v["day"] = json!(THU);
+        assert_eq!(scored(&v)["drivers"]["offCalendarMinutes"], 108.0);
+    }
+
+    #[test]
+    fn calls_are_five_each_capped_at_twenty() {
+        let events = (0..5)
+            .map(|i| ev(WED, 9.0 + i as f64, 9.5 + i as f64, "team call"))
+            .collect();
+        let v = with_events(base(WED, "normal"), events);
+        let r = scored(&v);
+        assert_eq!(r["drivers"]["callCount"], 5);
+        assert_eq!(r["drivers"]["calls"], 20.0);
+        // five 30-minute calls: 150 booked minutes → 40*150/540≈11.11, plus 20 → 31
+        assert_eq!(r["score"], 31);
+        // a sixth call stays capped
+        let six = with_events(
+            base(WED, "normal"),
+            (0..6)
+                .map(|i| ev(WED, 9.0 + i as f64, 9.5 + i as f64, "team call"))
+                .collect(),
+        );
+        assert_eq!(scored(&six)["drivers"]["calls"], 20.0);
+    }
+
+    #[test]
+    fn project_switches_after_the_first_capped_at_fifteen() {
+        let events = vec![
+            ev(WED, 9.0, 10.0, "alpha review"),
+            ev(WED, 10.0, 11.0, "beta deep work"),
+            ev(WED, 11.0, 12.0, "gamma [deadline]"),
+            ev(WED, 13.0, 14.0, "delta focus block"),
+        ];
+        let v = with_events(base(WED, "normal"), events);
+        let r = scored(&v);
+        assert_eq!(r["drivers"]["projectCount"], 4);
+        assert_eq!(r["drivers"]["projectSwitches"], 15.0);
+    }
+
+    #[test]
+    fn travel_adds_fifteen_and_in_person_forces_zero_slots() {
+        let v = with_events(
+            base(WED, "normal"),
+            vec![in_person(WED, 15.0, 16.0, "Client workshop")],
+        );
+        let r = scored(&v);
+        assert_eq!(r["drivers"]["travelOrInPerson"], 15.0);
+        assert_eq!(r["inPerson"], true);
+        assert_eq!(r["bandSlots"], 0);
+        assert_eq!(r["offeredSlots"], 0);
+        // 60 booked minutes → 40*60/540≈4.44, plus travel 15 → 19
+        assert_eq!(r["score"], 19);
+        assert!(arrange(&v).unwrap().is_empty());
+    }
+
+    #[test]
+    fn tripit_travel_outside_work_hours_does_not_count() {
+        let mut e = ev(WED, 7.0, 8.0, "UA 123 SFO-FCO");
+        e["calendarName"] = json!("TripIt");
+        e["calendarId"] = json!("tripit#family");
+        let v = with_events(base(WED, "normal"), vec![e]);
+        let r = scored(&v);
+        assert_eq!(r["drivers"]["travelOrInPerson"], 0.0);
+        assert_eq!(r["inPerson"], false);
+        assert_eq!(r["bandSlots"], 4);
+        assert_eq!(r["offeredSlots"], 4);
+        assert_eq!(r["score"], 0);
+    }
+
+    #[test]
+    fn deadlines_today_or_tomorrow_capped_at_ten() {
+        let events = vec![
+            ev(WED, 9.0, 9.5, "[deadline] ship alpha"),
+            ev(THU, 9.0, 9.5, "deadline: beta review"),
+            ev(THU, 14.0, 14.5, "gamma launch day"),
+            ev(FRI, 9.0, 9.5, "[deadline] later"),
+        ];
+        let v = with_events(base(WED, "normal"), events);
+        let r = scored(&v);
+        assert_eq!(r["drivers"]["deadlineCount"], 3);
+        assert_eq!(r["drivers"]["deadlines"], 10.0);
+        // Friday-only deadline is not today or tomorrow from Wednesday
+    }
+
+    #[test]
+    fn band_boundaries() {
+        assert_eq!(band_of(0), ("light", 4));
+        assert_eq!(band_of(30), ("light", 4));
+        assert_eq!(band_of(31), ("normal", 2));
+        assert_eq!(band_of(55), ("normal", 2));
+        assert_eq!(band_of(56), ("busy", 1));
+        assert_eq!(band_of(75), ("busy", 1));
+        assert_eq!(band_of(76), ("heavy", 0));
+        assert_eq!(band_of(100), ("heavy", 0));
+    }
+
+    #[test]
+    fn heavy_band_offers_nothing_even_in_normal_mode() {
+        // Full day 40 + 4 calls 20 + 3 switches 15 + travel 15 + 2 deadlines 10 = 100
+        let mut travel = ev(WED, 8.0, 8.5, "flight");
+        travel["calendarName"] = json!("TripIt");
+        let events = vec![
+            ev(WED, 9.0, 18.0, "alpha call"),
+            ev(WED, 9.0, 9.5, "beta call"),
+            ev(WED, 10.0, 10.5, "gamma [deadline]"),
+            ev(WED, 11.0, 11.5, "delta call"),
+            ev(WED, 12.0, 12.5, "standup call"),
+            ev(THU, 9.0, 9.5, "[deadline] tomorrow"),
+            travel,
+        ];
+        let v = with_events(base(WED, "normal"), events);
+        let r = scored(&v);
+        assert!(
+            r["score"].as_i64().unwrap() >= 76,
+            "expected heavy score, got {}",
+            r
+        );
+        assert_eq!(r["band"], "heavy");
+        assert_eq!(r["offeredSlots"], 0);
+        assert!(arrange(&v).unwrap().is_empty());
+    }
+
+    #[test]
+    fn normalize_rejects_unknown_mode_and_negative_caps() {
+        assert!(normalize_load_mode(&json!("crazy")).is_err());
+        assert!(
+            normalize_load_mode(
+                &json!({"mode":"heavy","tiers":{"heavy":{"maxPerDay":-1,"maxPerWeek":6}}})
+            )
+            .is_err()
+        );
+        assert!(normalize_off_calendar_load(&json!(-5)).is_err());
+        let ok = normalize_load_mode(&json!("heavy")).unwrap();
+        assert_eq!(ok["mode"], "heavy");
+        assert_eq!(ok["tiers"]["heavy"]["maxPerDay"], 2);
+    }
+
+    #[test]
+    fn preview_table_uses_ultra_heavy() {
+        let mut v = base(MON, "ultraHeavy");
+        v["days"] = json!([MON, TUE, WED, THU, FRI, "2026-11-23"]);
+        let rows = preview(&v).unwrap();
+        assert_eq!(rows.len(), 6);
+        assert_eq!(rows[0]["slots"], 1);
+        assert_eq!(rows[1]["slots"], 1);
+        assert_eq!(rows[2]["slots"], 1);
+        assert_eq!(rows[3]["slots"], 0);
+        assert_eq!(rows[4]["slots"], 0);
+        assert_eq!(rows[5]["slots"], 1); // next Monday, new week
+        assert_eq!(rows[0]["mode"], "ultraHeavy");
+        assert!(rows[0]["drivers"].as_str().unwrap().contains("booked time"));
+    }
+
+    #[test]
+    fn discord_zoom_meet_and_urls_are_virtual_and_do_not_close_the_day() {
+        for loc in [
+            "Discord: Avalanche Team1 server, Town Hall",
+            "Zoom",
+            "Microsoft Teams",
+            "Google Meet (instructions in description)",
+            "Telegram",
+            "Online office hours",
+            "Virtual standup",
+            "https://meet.google.com/abc-defg",
+        ] {
+            let mut e = ev(WED, 15.0, 16.0, "Team1 Weekly Sync");
+            e["location"] = json!(loc);
+            e["inPerson"] = json!(true); // stale flag must not win over the location
+            e["calendarName"] = json!("General T1");
+            let v = with_events(base(WED, "normal"), vec![e]);
+            let r = scored(&v);
+            assert_eq!(r["inPerson"], false, "{loc}");
+            assert_eq!(r["drivers"]["travelOrInPerson"], 0.0, "{loc}");
+            assert_eq!(r["bandSlots"], 4, "{loc}");
+            assert_eq!(r["offeredSlots"], 4, "{loc}");
+        }
+    }
+
+    #[test]
+    fn training_and_sport_events_never_close_the_day() {
+        // Gym on the Training calendar during work hours: booked time only.
+        let v = with_events(
+            base(WED, "normal"),
+            vec![training(WED, 15.5, 17.25, "Palestra — gambe e core")],
+        );
+        let r = scored(&v);
+        assert_eq!(r["inPerson"], false);
+        assert_eq!(r["drivers"]["travelOrInPerson"], 0.0);
+        assert!(r["drivers"]["bookedMinutes"].as_f64().unwrap() > 0.0);
+        assert_eq!(r["bandSlots"], 4);
+        assert_eq!(r["offeredSlots"], 4);
+        assert!(!arrange(&v).unwrap().is_empty());
+
+        // Tennis commute on the Personal calendar is still sport, even mid-day.
+        let mut tennis = ev(WED, 11.0, 12.0, "Travel · Tennis");
+        tennis["inPerson"] = json!(true);
+        tennis["location"] = json!("Sporting Club Panda, Via Nomentana 1070, 00156 Roma");
+        tennis["calendarName"] = json!("Personal");
+        let v = with_events(base(WED, "normal"), vec![tennis]);
+        let r = scored(&v);
+        assert_eq!(r["inPerson"], false);
+        assert_eq!(r["drivers"]["travelOrInPerson"], 0.0);
+        assert_eq!(r["offeredSlots"], 4);
+    }
+
+    #[test]
+    fn only_daytime_in_person_work_or_trips_close_and_score() {
+        // Evening in-person work: after 18:00, no close, no +15.
+        let v = with_events(
+            base(WED, "normal"),
+            vec![in_person(WED, 19.0, 20.0, "Client dinner")],
+        );
+        let r = scored(&v);
+        assert_eq!(r["inPerson"], false);
+        assert_eq!(r["drivers"]["travelOrInPerson"], 0.0);
+        assert_eq!(r["drivers"]["bookedMinutes"], 0.0); // outside the workday window
+        assert_eq!(r["offeredSlots"], 4);
+        assert_eq!(r["score"], 0);
+
+        // Morning flight before 09:00 does not count (already covered); a daytime flight closes.
+        let mut flight = ev(WED, 10.0, 13.0, "UA 123 SFO-FCO");
+        flight["calendarName"] = json!("TripIt");
+        flight["calendarId"] = json!("tripit#family");
+        let v = with_events(base(WED, "normal"), vec![flight]);
+        let r = scored(&v);
+        assert_eq!(r["inPerson"], true);
+        assert_eq!(r["drivers"]["travelOrInPerson"], 15.0);
+        assert_eq!(r["bandSlots"], 0);
+        assert_eq!(r["offeredSlots"], 0);
+        // 180 booked minutes → 40*180/540≈13.33, plus 15 → 28
+        assert_eq!(r["score"], 28);
+        assert!(arrange(&v).unwrap().is_empty());
+    }
+
+    #[test]
+    fn week_cap_goes_to_the_lightest_days_first() {
+        // Mon is busier than Fri: Fri, Thu, then the next lightest get the ultraHeavy week cap.
+        let mut v = base(MON, "ultraHeavy");
+        // Monday: half the day booked → 20 points, still light? 20 is light (4). Need Mon heavier.
+        // 4 calls of 30 min = 10 booked time + 20 calls = 31, normal band 2, plus more...
+        // Give Mon a work in-person midday meeting? That would zero Mon (closes). Then Mon offers 0
+        // and light days get the cap — that's also a good case. Use booked time + calls on Mon/Tue
+        // so they have higher scores but still offer band slots (no close).
+        let mon_events = vec![
+            ev(MON, 9.0, 13.5, "alpha call"), // 270 min → 20, 1 call → 5, score 25 light
+            ev(MON, 14.0, 15.0, "beta sync"),
+        ];
+        // 270+60=330? 9-13:30 is 270, 14-15 is 60, total 330 → 24.4 + 2 calls 10 = 34 normal
+        let tue_events = vec![ev(TUE, 9.0, 12.0, "alpha call")]; // 180 → 13.3 + 5 = 18 light
+        // Wed, Thu, Fri empty → score 0 light
+        let mut events = mon_events;
+        events.extend(tue_events);
+        let v = with_events(v, events);
+        let plan = week_plan(&v).unwrap();
+        let offered: Vec<(String, i64, i64)> = plan
+            .iter()
+            .map(|r| {
+                (
+                    r["day"].as_str().unwrap().to_string(),
+                    r["score"].as_i64().unwrap(),
+                    r["offeredSlots"].as_i64().unwrap(),
+                )
+            })
+            .collect();
+        // Scores: Mon highest, Tue mid, Wed=Thu=Fri 0. Lightest first: Wed, Thu, Fri (ties earlier first...
+        // Wed, Thu, Fri all 0, earlier first: Wed, Thu, Fri each get 1. Mon and Tue get 0 from week cap.
+        let slots: Vec<i64> = plan
+            .iter()
+            .map(|r| r["offeredSlots"].as_i64().unwrap())
+            .collect();
+        let scores: Vec<i64> = plan.iter().map(|r| r["score"].as_i64().unwrap()).collect();
+        assert!(
+            scores[0] > scores[1] && scores[1] > scores[2],
+            "setup: {offered:?}"
+        );
+        assert_eq!(scores[2], 0);
+        assert_eq!(
+            slots,
+            vec![0, 0, 1, 1, 1],
+            "lightest days first, got {offered:?}"
+        );
+    }
+
+    #[test]
+    fn week_cap_lightest_first_still_counts_existing_bookings() {
+        let mut v = base(MON, "ultraHeavy");
+        v["weekBookings"] = json!([booking(MON, 10.0, "confirmed")]);
+        let plan = week_plan(&v).unwrap();
+        // All days score 0, ties to earlier: remaining cap = 3-1=2, so Mon and Tue get 1, rest 0.
+        let slots: Vec<i64> = plan
+            .iter()
+            .map(|r| r["offeredSlots"].as_i64().unwrap())
+            .collect();
+        assert_eq!(plan[0]["weekBookings"], 1);
+        assert_eq!(slots, vec![1, 1, 0, 0, 0]);
+    }
 }
