@@ -888,11 +888,17 @@ impl Providers {
 pub fn encode(s: &str) -> String {
     url::form_urlencoded::byte_serialize(s.as_bytes()).collect()
 }
-pub fn physical(s: &str) -> bool {
+pub fn virtual_location(s: &str) -> bool {
     static VIRTUAL: LazyLock<regex::Regex> = LazyLock::new(|| {
-        regex::Regex::new(r"(?i)^(?:https?://|tel:)|\b(?:google\s*meet|zoom|microsoft\s*teams|teams\s*meeting|webex|online|virtual)\b").expect("static regex")
+        regex::Regex::new(
+            r"(?i)https?://|www\.|tel:|\b(?:discord|zoom|teams|meet|telegram|online|virtual|google\s*meet|microsoft\s*teams|teams\s*meeting|webex)\b",
+        )
+        .expect("static regex")
     });
-    !s.trim().is_empty() && !VIRTUAL.is_match(s.trim())
+    VIRTUAL.is_match(s.trim())
+}
+pub fn physical(s: &str) -> bool {
+    !s.trim().is_empty() && !virtual_location(s)
 }
 fn photon(v: &Value) -> Option<Value> {
     let p = &v["properties"];
@@ -969,4 +975,45 @@ pub fn choice(answer: &Value, expected: &[&str]) -> Option<(String, f64)> {
         return None;
     }
     Some((c, confidence))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn virtual_locations_are_not_physical() {
+        for loc in [
+            "Discord: Avalanche Team1 server, Town Hall",
+            "Zoom https://zoom.us/j/123",
+            "Microsoft Teams",
+            "Teams meeting",
+            "Google Meet (instructions in description)",
+            "Meet",
+            "Telegram",
+            "Online workshop",
+            "Virtual coffee",
+            "https://meet.google.com/abc-defg",
+            "Join at www.example.com/room",
+            "tel:+39061234567",
+        ] {
+            assert!(virtual_location(loc), "{loc} should be virtual");
+            assert!(!physical(loc), "{loc} should not be physical");
+        }
+    }
+
+    #[test]
+    fn street_addresses_stay_physical() {
+        for loc in [
+            "Via del Corso 1, Rome",
+            "Italiana Fitness Nomentana, Via Emanuele Ciaceri 37, Roma",
+            "Sporting Club Panda, Via Nomentana 1070, 00156 Roma",
+            "Golden Store Talenti, Via Adolfo Albertazzi 74/76, 00137 Roma",
+        ] {
+            assert!(!virtual_location(loc), "{loc} should not be virtual");
+            assert!(physical(loc), "{loc} should be physical");
+        }
+        assert!(!physical(""));
+        assert!(!physical("   "));
+    }
 }
