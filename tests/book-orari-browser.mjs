@@ -1,7 +1,8 @@
 // Run this callback with playwright-cli run-code (strip `export default`).
 // Requires .local/preview.py: production CSP and reference/public asset fallback.
 // All API responses, names, addresses and calendar instants below are synthetic.
-export default async (page) => {
+// Pass { captureScreenshots: false } to validate without replacing the review pack.
+export default async (page, { captureScreenshots = true } = {}) => {
   const origin = 'http://127.0.0.1:18766';
   const output = '.local/review/book-orari';
   const productionCsp = "default-src 'self'; base-uri 'none'; connect-src 'self'; form-action 'self'; frame-ancestors 'none'; img-src 'self' data:; object-src 'none'; script-src 'self'; style-src 'self'";
@@ -84,7 +85,9 @@ export default async (page) => {
     }
     await page.evaluate(() => { document.activeElement?.blur(); scrollTo(0, 0); });
     const path = `${output}/${lang}-${kind}-${step}-${width}-${theme}.png`;
-    await page.screenshot({ path, fullPage: true }); report.captures.push(path);
+    if (captureScreenshots) {
+      await page.screenshot({ path, fullPage: true }); report.captures.push(path);
+    }
     const fit = await page.evaluate(() => {
       const visible = el => !!el.getClientRects().length;
       const buttons = [...document.querySelectorAll('.time-button,.next-button,.confirm-button,.duration-option,.calendar-grid button,#viewer-timezone,.back-button')].filter(el => visible(el) && !el.disabled);
@@ -98,7 +101,9 @@ export default async (page) => {
     if (width === 375 || width === 466) {
       if (step === 'slot') await page.locator('#times-panel').evaluate(el => scrollTo(0, el.getBoundingClientRect().top + scrollY - 90));
       const viewport = path.replace('.png', '-viewport.png');
-      await page.screenshot({ path: viewport }); report.captures.push(viewport);
+      if (captureScreenshots) {
+        await page.screenshot({ path: viewport }); report.captures.push(viewport);
+      }
     }
   }
   async function details(width) {
@@ -174,13 +179,20 @@ export default async (page) => {
   await page.locator('.confirm-button').click(); check(bookRequests === beforeInvalid, 'native form validation prevents incomplete booking');
   await page.locator('#guest-name').fill('Alex Rivera'); await page.locator('#guest-email').fill('nome@example.com');
   const namedAction = await page.locator('.confirm-button').innerText();
+  const beforePending = bookRequests;
   bookMode = 'pending'; await page.locator('.confirm-button').click();
   await page.waitForFunction(() => document.querySelector('.confirm-button').disabled);
   check(await page.locator('.confirm-button').innerText() === 'Booking…', 'pending booking label and disabled state');
+  check(await page.locator('#booking-status').evaluate(el => !el.closest('[inert]')), 'pending status has no inert ancestor');
+  check((await page.locator('#booking-status').ariaSnapshot()).includes('Rechecking availability'), 'pending status is exposed to assistive technology');
+  await page.locator('#booking-form').evaluate(form => form.dispatchEvent(new SubmitEvent('submit', { bubbles: true, cancelable: true })));
+  check(bookRequests === beforePending + 1, 'second submit during pending does not send another booking request');
   bookMode = 'conflict'; releaseBooking();
   await page.waitForFunction(() => !document.querySelector('.confirm-button').disabled);
   check(await page.locator('.confirm-button').innerText() === namedAction, 'conflict restores named action');
   check((await page.locator('#booking-status').innerText()).includes('no longer available'), 'conflict message');
+  check(await page.locator('#booking-status').evaluate(el => !el.closest('[inert]')), 'conflict status has no inert ancestor');
+  check((await page.locator('#booking-status').ariaSnapshot()).includes('no longer available'), 'conflict status is exposed to assistive technology');
   bookMode = 'success'; await page.locator('.confirm-button').click(); await page.locator('#success-step').waitFor();
   // Distinct empty/error states and retry, also without live backend data.
   for (const kind of ['emptyMonth', 'emptyDay']) {

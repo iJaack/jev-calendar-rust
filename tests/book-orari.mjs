@@ -214,14 +214,22 @@ for (const lang of ['it', 'en']) {
     get('guest-email').value = 'nome@example.com';
     const button = get('booking-form').querySelector('button[type="submit"]');
     const label = button.textContent;
+    const assertStatusAnnounceable = () => {
+      assert.equal(get('booking-status').getAttribute('role'), 'status');
+      for (let node = get('booking-status'); node; node = node.parentElement) {
+        assert.ok(!node.inert && node.getAttribute('inert') === null, `booking status must not be inert (${node.id || node.tagName})`);
+      }
+    };
     const pending = f.event('booking-form', 'submit', { submitter: button });
     assert.equal(button.disabled, true);
     assert.equal(button.textContent, lang === 'it' ? 'Sto prenotando…' : 'Booking…');
+    assertStatusAnnounceable();
+    assert.equal(get('booking-status').textContent, lang === 'it' ? "Sto ricontrollando la disponibilità e creando l'evento…" : 'Rechecking availability and creating your event…');
     await f.event('booking-form', 'submit', { submitter: button });
     assert.equal(f.calls.filter(c => c.path === '/api/book').length, 1);
     finish({ ok: false, json: async () => ({ error: 'busy' }) }); await pending;
     assert.equal(button.disabled, false); assert.equal(button.textContent, label);
-    assert.equal(get('date-step').inert, false);
+    assertStatusAnnounceable();
     assert.equal(get('booking-status').textContent, lang === 'it' ? "Quell'orario non è più disponibile. Torna indietro e scegline un altro." : 'That time is no longer available. Go back and choose another.');
     const success = f.event('booking-form', 'submit', { submitter: button });
     finish({ ok: true, json: async () => ({ booking: { meetingTitle: '<Synthetic>' } }) }); await success;

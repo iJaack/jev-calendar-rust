@@ -427,7 +427,6 @@ $('booking-form').addEventListener('submit', async (event) => {
   event.preventDefault();
   if (state.submitting) return;
   state.submitting = true;
-  $('date-step').inert = true;
   const button = event.submitter || $('booking-form').querySelector('button[type="submit"]'); button.disabled = true; button.textContent = t('booking');
   setStatus($('booking-status'), t('submitting'));
   try {
@@ -465,7 +464,6 @@ $('booking-form').addEventListener('submit', async (event) => {
     setStatus($('booking-status'), conflict ? t('conflict') : error instanceof TypeError ? t('unavailable') : error.message, true);
   } finally {
     state.submitting = false;
-    $('date-step').inert = false;
     button.disabled = false; button.textContent = selectedTime(state.choice.start).actionLabel;
   }
 });
