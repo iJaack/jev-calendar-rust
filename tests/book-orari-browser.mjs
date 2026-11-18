@@ -1,11 +1,24 @@
 // Run this callback with playwright-cli run-code (strip `export default`).
-// Requires the public tree served with reference/public asset fallback, as in release.
+// Requires .local/preview.py: production CSP and reference/public asset fallback.
 // All API responses, names, addresses and calendar instants below are synthetic.
 export default async (page) => {
   const origin = 'http://127.0.0.1:18766';
   const output = '.local/review/book-orari';
-  const report = { captures: [], checks: [], errors: [] };
+  const productionCsp = "default-src 'self'; base-uri 'none'; connect-src 'self'; form-action 'self'; frame-ancestors 'none'; img-src 'self' data:; object-src 'none'; script-src 'self'; style-src 'self'";
+  const report = { captures: [], checks: [], errors: [], cspViolations: [], csp: productionCsp, documents: 0 };
   const check = (condition, message) => { if (!condition) throw new Error(message); report.checks.push(message); };
+  await page.exposeFunction('recordBookingCspViolation', violation => report.cspViolations.push(violation));
+  await page.addInitScript(() => {
+    document.addEventListener('securitypolicyviolation', event => {
+      window.recordBookingCspViolation({ directive: event.effectiveDirective, blockedURI: event.blockedURI, disposition: event.disposition });
+    });
+  });
+  page.on('response', response => {
+    if (response.request().isNavigationRequest() && response.url().startsWith(origin + '/')) {
+      report.documents++;
+      check(response.headers()['content-security-policy'] === productionCsp, 'document enforces the unchanged production CSP');
+    }
+  });
   page.on('pageerror', error => report.errors.push(error.message));
   page.on('console', message => { if (message.type() === 'error') report.errors.push(message.text()); });
   let scenario = 'different', bookMode = 'success', bookRequests = 0;
@@ -154,6 +167,10 @@ export default async (page) => {
   check((await page.locator('#availability-status').innerText()).includes('Disponibilità non disponibile'), 'network failure translated');
   scenario = 'different'; await page.locator('#retry-dates').click(); await page.locator('.time-button').first().waitFor();
   check(await page.locator('.time-button').count() > 0, 'retry recovers from network failure');
+  // Let queued securitypolicyviolation events reach the Node-side binding.
+  await page.evaluate(() => new Promise(resolve => setTimeout(resolve, 0)));
+  check(report.documents > 0, 'CSP header was verified on real document responses');
+  check(report.cspViolations.length === 0, 'zero securitypolicyviolation events throughout the booking flow');
   // Resource errors are expected only for the injected 409 and network abort.
   check(report.errors.every(error => error.includes('ERR_FAILED') || error.includes('409 (Conflict)')), 'no unexpected page or console errors');
   return report;

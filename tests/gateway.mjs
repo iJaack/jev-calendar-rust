@@ -4,7 +4,55 @@ import {createServer,request} from 'node:http';
 import {once} from 'node:events';
 import {spawn} from 'node:child_process';
 import {createHash} from 'node:crypto';
+import {mkdirSync,mkdtempSync,readFileSync,rmSync} from 'node:fs';
+import {join} from 'node:path';
 const root=new URL('..',import.meta.url).pathname;
+const productionCsp="default-src 'self'; base-uri 'none'; connect-src 'self'; form-action 'self'; frame-ancestors 'none'; img-src 'self' data:; object-src 'none'; script-src 'self'; style-src 'self'";
+
+test('real gateway serves the booking page and CSP-safe assets with the unchanged production policy',async t=>{
+ mkdirSync(join(root,'.local'),{recursive:true});
+ const dir=mkdtempSync(join(root,'.local','gateway-csp-'));
+ const children=[];
+ t.after(async()=>{
+  for(const child of children.reverse())if(child.exitCode===null&&child.signalCode===null){child.kill();await once(child,'exit');}
+  rmSync(dir,{recursive:true,force:true});
+ });
+ async function start(mode,extra){
+  const listener=createServer().listen(0,'127.0.0.1');await once(listener,'listening');
+  const port=listener.address().port;await new Promise(resolve=>listener.close(resolve));
+  assert.ok(![3030,3031].includes(port));
+  const child=spawn(root+'target/debug/jev-calendar',[mode],{cwd:root,env:{PATH:process.env.PATH,PORT:String(port),PUBLIC_PORT:String(port),DEMO_MODE:'true',DATABASE_PATH:join(dir,'demo.sqlite'),APP_ENCRYPTION_KEY:'synthetic-csp-key',APP_BASE_URL:`http://127.0.0.1:${port}`,PUBLIC_HOST:'book.example.test',JEV_ASSET_ROOT:root+'public',...extra},stdio:['ignore','pipe','pipe']});
+  children.push(child);
+  let stderr='';child.stderr.on('data',chunk=>stderr+=chunk);
+  await Promise.race([once(child.stdout,'data'),once(child,'exit').then(()=>{throw Error('CSP fixture failed startup: '+stderr);})]);
+  return port;
+ }
+ const privatePort=await start('--private',{});
+ const publicPort=await start('--public',{INTERNAL_ORIGIN:`http://127.0.0.1:${privatePort}`});
+ const html=readFileSync(join(root,'public/index.html'),'utf8');
+ for(const path of ['/','/assets/book-lang.js','/assets/book-orari.css']){
+  const expected=readFileSync(join(root,'public',path==='/'?'index.html':path));
+  const version=createHash('sha256').update(expected).digest('hex').slice(0,16);
+  if(path!=='/')assert.ok(html.includes(path+'?v='+version));
+  for(const url of path==='/'?[path]:[path,path+'?v='+version]){
+   const response=await new Promise((resolve,reject)=>{
+    const req=request({hostname:'127.0.0.1',port:publicPort,path:url,headers:{Host:'book.example.test'}},res=>{
+     const chunks=[];res.on('data',chunk=>chunks.push(chunk));
+     res.on('end',()=>resolve({status:res.statusCode,headers:res.headers,body:Buffer.concat(chunks)}));
+    });req.on('error',reject);req.end();
+   });
+   assert.equal(response.status,200,url);
+   assert.equal(response.headers['content-security-policy'],productionCsp,url);
+   assert.equal(response.headers['x-jev-backend'],'rust');
+   assert.deepEqual(response.body,expected,url);
+   if(path!=='/'){
+    assert.match(response.headers['content-type'],path.endsWith('.js')?/javascript/:/text\/css/);
+    assert.equal(response.headers['cache-control'],url.includes('?')?'public, max-age=31536000, immutable':'public, max-age=300');
+   }
+  }
+ }
+});
+
 test('native public gateway keeps private routes, credentials and cross-site mutations out',async t=>{
  const calls=[];const upstream=createServer((req,res)=>{calls.push({path:req.url,headers:req.headers});res.writeHead(req.url.includes('missing')?404:200,{'Content-Type':'application/json','Set-Cookie':'private=secret','ETag':'\"'+createHash('sha256').update('{}').digest('hex')+'\"'});res.end('{}');}).listen(0,'127.0.0.1');await once(upstream,'listening');
  const free=createServer().listen(0,'127.0.0.1');await once(free,'listening');const port=free.address().port;await new Promise(r=>free.close(r));

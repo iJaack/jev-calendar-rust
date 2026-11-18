@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
+import { createHash } from 'node:crypto';
 import { testDocument } from './booking-types-dom.mjs';
 const html = readFileSync(new URL('../public/index.html', import.meta.url), 'utf8');
 const source = readFileSync(new URL('../public/assets/public.js', import.meta.url), 'utf8');
@@ -11,9 +12,50 @@ function helpers() {
   return context;
 }
 const instant = '2026-11-24T14:00:00Z';
+test('booking markup is compatible with the production script and style CSP', () => {
+  const document = testDocument(html);
+  for (const script of document.querySelectorAll('script')) {
+    assert.ok(script.getAttribute('src'), 'every script must load an external source');
+  }
+  assert.equal(document.querySelectorAll('style').length, 0, 'styles must be external');
+  function checkAttributes(element) {
+    for (const name of Object.keys(element.attrs)) {
+      assert.doesNotMatch(name, /^(?:style|on.*)$/i, 'no inline style or event-handler attributes');
+    }
+    element.children.forEach(checkAttributes);
+  }
+  checkAttributes(document);
+});
+test('all booking CSS and JS asset URLs have matching content digests', () => {
+  const document = testDocument(html);
+  const references = [
+    ...document.querySelectorAll('script').map(el => el.getAttribute('src')),
+    ...document.querySelectorAll('link').map(el => el.getAttribute('href')),
+  ].filter(url => /^\/assets\/.*\.(?:css|js)(?:[?#]|$)/.test(url || ''));
+  assert.ok(references.some(url => url.startsWith('/assets/book-lang.js?')));
+  assert.ok(references.some(url => url.startsWith('/assets/book-orari.css?')));
+  const styles = document.querySelectorAll('link').map(el => el.getAttribute('href'));
+  assert.ok(styles[styles.findIndex(url => url.startsWith('/assets/app.css?')) + 1].startsWith('/assets/book-orari.css?'), 'booking stylesheet follows app.css');
+  for (const page of ['manage.html', 'owner.html', 'privacy.html']) {
+    assert.doesNotMatch(readFileSync(new URL('../public/' + page, import.meta.url), 'utf8'), /\/assets\/book-(?:lang\.js|orari\.css)/, 'booking assets remain booking-only');
+  }
+  for (const reference of references) {
+    const url = new URL(reference, 'https://book.example.test');
+    const bytes = readFileSync(new URL('../public' + url.pathname, import.meta.url));
+    assert.equal(url.searchParams.get('v'), createHash('sha256').update(bytes).digest('hex').slice(0, 16), reference);
+  }
+});
 test('language follows only the first browser preference, with capture overrides', () => {
-  const head = html.match(/<script id="booking-language">([\s\S]*?)<\/script>/)?.[1];
-  assert.ok(head, 'synchronous language script exists');
+  const documentMarkup = testDocument(html);
+  const scripts = documentMarkup.querySelectorAll('script');
+  const languageScript = scripts.find(el => el.getAttribute('src')?.startsWith('/assets/book-lang.js?'));
+  assert.ok(languageScript, 'external language script exists');
+  for (const attr of ['async', 'defer', 'type']) assert.equal(languageScript.getAttribute(attr), null, 'language script is synchronous and classic');
+  for (const asset of ['jaack/theme.js', 'jaack-local.js']) {
+    assert.ok(scripts.indexOf(languageScript) < scripts.findIndex(el => el.getAttribute('src')?.startsWith('/assets/' + asset + '?')));
+  }
+  assert.ok(documentMarkup.querySelector('head').children.includes(languageScript));
+  const head = readFileSync(new URL('../public/assets/book-lang.js', import.meta.url), 'utf8');
   const document = { documentElement: {}, title: '' };
   const ctx = vm.createContext({ document, URLSearchParams, location: { search: '' } });
   vm.runInContext(head, ctx);
@@ -27,6 +69,16 @@ test('language follows only the first browser preference, with capture overrides
   assert.equal(ctx.detectBookingLanguage({ languages: ['it'] }, '?lang=fr'), 'it');
   assert.equal(document.documentElement.lang, 'en');
   assert.equal(document.title, 'Book a meeting with Jaack');
+  for (const [browser, search, language] of [
+    [{ languages: ['it-IT'] }, '', 'it'],
+    [{ languages: ['en'] }, '?lang=it', 'it'],
+    [{ languages: ['it'] }, '?lang=en', 'en'],
+  ]) {
+    const doc = { documentElement: {}, title: '' };
+    vm.runInNewContext(head, { document: doc, navigator: browser, URLSearchParams, location: { search } });
+    assert.equal(doc.documentElement.lang, language);
+    assert.equal(doc.title, language === 'it' ? 'Prenota un incontro con Jaack' : 'Book a meeting with Jaack');
+  }
 });
 for (const lang of ['it', 'en']) {
   test(`${lang}: clock and calendar-day comparisons, host wording and accessible names`, () => {
