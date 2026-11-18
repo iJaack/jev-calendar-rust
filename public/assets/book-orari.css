@@ -1,3 +1,24 @@
+.booking-page > .skip-link {
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+  transform: none;
+}
+.booking-page > .skip-link:is(:focus, :focus-visible) {
+  width: auto;
+  height: auto;
+  padding: 10px 14px;
+  margin: 0;
+  overflow: visible;
+  clip: auto;
+  clip-path: none;
+  white-space: normal;
+}
 #date-step .date-time-grid { grid-template-columns: minmax(0, 1fr); max-width: none; }
 #date-step .times-panel { border-left: 0; padding-left: 0; }
 #date-step .timezone-row { margin: 0 0 var(--jk-s3); display: grid; grid-template-columns: 1fr auto; gap: 4px 12px; color: var(--jk-t2); font-size: var(--jk-fs-note); font-weight: 500; letter-spacing: 0; text-transform: none; }
@@ -32,7 +53,7 @@
   #slots .times-empty, #slots .loading-times { grid-column: 1 / -1; }
 }
 @container (min-width: 760px) {
-  #date-step .date-time-grid { max-width: 760px; grid-template-columns: minmax(280px, 400px) minmax(200px, 260px); column-gap: var(--jk-s6); align-items: start; }
+  #date-step .date-time-grid { grid-template-columns: minmax(280px, 400px) minmax(0, 1fr); column-gap: var(--jk-s6); align-items: start; }
   #date-step .times-panel { border-left: 1px solid var(--jk-hair); padding-left: var(--jk-s5); }
   #slots { grid-template-columns: minmax(0, 1fr); max-height: 420px; min-height: 360px; }
   #date-step:has(#details-step:not(.hidden)) .calendar { display: block; }
