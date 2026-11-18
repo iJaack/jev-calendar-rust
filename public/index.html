@@ -4,7 +4,17 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
     <meta name="color-scheme" content="light dark">
-    <title>Jev Calendar · Book a meeting with Jaack</title>
+    <title>Book a meeting with Jaack</title>
+    <script id="booking-language">
+      function detectBookingLanguage(browser, search = '') {
+        const override = new URLSearchParams(search).get('lang');
+        if (override === 'it' || override === 'en') return override;
+        const first = browser?.languages?.[0] || browser?.language || '';
+        return first.toLowerCase().startsWith('it') ? 'it' : 'en';
+      }
+      document.documentElement.lang = detectBookingLanguage(typeof navigator === 'undefined' ? undefined : navigator, location.search);
+      document.title = document.documentElement.lang === 'it' ? 'Prenota un incontro con Jaack' : 'Book a meeting with Jaack';
+    </script>
     <link rel="icon" href="/assets/favicon.png?v=1" type="image/png">
     <script src="/assets/jaack/theme.js?v=095b0b8bd0cb1c7e" data-light-from="7" data-light-to="19" data-key="jaack.theme"></script>
     <link rel="stylesheet" href="/assets/jaack/jaack.css?v=fd35a96d50b6255c">
@@ -12,12 +22,61 @@
     <link rel="stylesheet" href="/assets/app.css?v=a83749d5f3076f9a">
     <script src="/assets/jaack/jaack.js?v=0e5b832cc9f88ad4" defer></script>
     <script src="/assets/jaack-local.js?v=d7672b03314e3897" defer></script>
+
+    <!-- Booking-only rules stay here because the shared styles are digest-pinned by out-of-scope pages. -->
+    <style>
+      #date-step .date-time-grid { grid-template-columns: minmax(0, 1fr); max-width: none; }
+      #date-step .times-panel { border-left: 0; padding-left: 0; }
+      #date-step .timezone-row { margin: 0 0 var(--jk-s3); display: grid; grid-template-columns: 1fr auto; gap: 4px 12px; color: var(--jk-t2); font-size: var(--jk-fs-note); font-weight: 500; letter-spacing: 0; text-transform: none; }
+      #timezone-description { align-self: center; overflow-wrap: anywhere; }
+      #date-step .timezone-row label { display: flex; align-items: center; min-height: 44px; font-size: var(--jk-fs-xs); font-weight: 700; letter-spacing: var(--jk-track-label); text-transform: uppercase; }
+      #viewer-timezone { grid-column: 1 / -1; }
+      #slots { display: grid; grid-template-columns: minmax(0, 1fr); align-content: start; gap: 0 16px; max-height: none; }
+      #slots .time-button { position: relative; min-width: 0; display: flex; flex-direction: column; align-items: flex-start; justify-content: center; gap: 4px; padding: 10px 4px; transition: none; }
+      #slots .time-guest { font: 650 var(--jk-fs-lg, var(--jk-fs-lede))/1.2 var(--jk-font); color: var(--jk-ink); font-variant-numeric: tabular-nums lining-nums; white-space: nowrap; }
+      #slots .time-host { color: var(--jk-t2); font-size: var(--jk-fs-note); font-weight: 500; line-height: 1.35; font-variant-numeric: tabular-nums lining-nums; text-wrap: pretty; }
+      /* Next shares the first time row; the host line keeps the full row width. */
+      #slots .time-choice.selected { grid-template-columns: minmax(0, 1fr); }
+      #slots .time-choice.selected .time-button { grid-area: 1 / 1; padding: 0 4px 10px; gap: 0; }
+      #slots .time-choice.selected .time-button:not(:has(.time-host)) { padding-bottom: 0; }
+      #slots .time-choice.selected .time-guest { display: flex; align-items: center; min-height: 44px; padding-right: 86px; }
+      #slots .time-choice.selected .time-button::after { position: absolute; top: 12px; right: 72px; margin: 0; }
+      #slots .time-choice.selected .next-button { grid-area: 1 / 1; justify-self: end; align-self: start; margin: 0 4px 0 0; z-index: 1; }
+      #slots .next-button { transition: none; }
+      #slots .time-choice.selected .next-button { min-width: 60px; padding: 0 10px; }
+      .selected-summary .summary-guest { font-size: var(--jk-fs-lede); font-weight: 650; line-height: 1.35; letter-spacing: -0.02em; }
+      .selected-summary .summary-host, .selected-summary .summary-meta, .selected-summary .summary-email { color: var(--jk-t2); font-size: var(--jk-fs-note); line-height: 1.45; overflow-wrap: anywhere; }
+      #details-step { min-width: 0; }
+      #details-step .book-form { padding: var(--jk-s4); }
+      #details-step .confirm-button { max-width: 100%; line-height: 1.4; white-space: normal; }
+      #retry-dates { min-height: 44px; }
+      #date-step:has(#details-step:not(.hidden)) .calendar,
+      #date-step:has(#details-step:not(.hidden)) .book-tools,
+      #date-step:has(#details-step:not(.hidden)) #availability-status,
+      #date-step:has(#details-step:not(.hidden)) #retry-dates { display: none; }
+      @container (min-width: 520px) {
+        #slots { grid-template-columns: repeat(2, minmax(0, 1fr)); min-height: 0; }
+        #slots .times-empty, #slots .loading-times { grid-column: 1 / -1; }
+      }
+      @container (min-width: 760px) {
+        #date-step .date-time-grid { max-width: 760px; grid-template-columns: minmax(280px, 400px) minmax(200px, 260px); column-gap: var(--jk-s6); align-items: start; }
+        #date-step .times-panel { border-left: 1px solid var(--jk-hair); padding-left: var(--jk-s5); }
+        #slots { grid-template-columns: minmax(0, 1fr); max-height: 420px; min-height: 360px; }
+        #date-step:has(#details-step:not(.hidden)) .calendar { display: block; }
+        #date-step:has(#details-step:not(.hidden)) .book-tools { display: flex; }
+        #details-step .book-form { padding: var(--jk-s3); }
+      }
+      @media (max-width: 519px) {
+        .booking-page .jk-page { padding-left: max(20px, env(safe-area-inset-left)); padding-right: max(20px, env(safe-area-inset-right)); }
+        .calendar-grid button { min-width: 44px; }
+      }
+    </style>
   </head>
   <body class="booking-page">
-    <a class="skip-link" href="#scheduler">Skip to booking</a>
+    <a class="skip-link" href="#scheduler"><span class="lang-en">Skip to booking</span><span class="lang-it">Vai alla prenotazione</span></a>
     <header class="jk-top jk-glass">
-      <a class="jk-mark" href="/" aria-label="jaack.me booking home">jaack<span class="dot">.</span><span class="dom">me</span></a>
-      <span class="jk-tag">Book</span>
+      <a class="jk-mark" href="/" aria-label="jaack.me booking home" data-booking-label="home">jaack<span class="dot">.</span><span class="dom">me</span></a>
+      <span class="jk-tag"><span class="lang-en">Book</span><span class="lang-it">Prenota</span></span>
       <span data-jk-theme-switch></span>
     </header>
 
@@ -25,100 +84,104 @@
       <div class="jk-chs">
         <section class="jk-ch" aria-labelledby="book-title">
           <header class="jk-ct">
-            <p class="jk-eb">Date &amp; time</p>
-            <h1 class="jk-q" id="book-title">Meet with Jaack</h1>
-            <p class="jk-lede">Choose a time that works for you. Meetings are on Google Meet, and availability already accounts for Jaack’s existing commitments.</p>
+            <p class="jk-eb"><span class="lang-en">Date &amp; time</span><span class="lang-it">Data e ora</span></p>
+            <h1 class="jk-q" id="book-title"><span class="lang-en">Meet with Jaack</span><span class="lang-it">Incontra Jaack</span></h1>
+            <p class="jk-lede"><span class="lang-en">Choose a time that works for you. Meetings are on Google Meet, and availability already accounts for Jaack’s existing commitments.</span><span class="lang-it">Scegli un orario che fa per te. Gli incontri sono su Google Meet, e la disponibilità tiene già conto degli impegni di Jaack.</span></p>
           </header>
 
           <div class="jk-cb">
             <div class="book-host">
-              <img class="host-avatar" src="/assets/jaack-portrait.jpg" alt="Jaack’s profile photo" width="40" height="40">
-              <p>Jaack · <span id="duration-label">30 min</span> · Google Meet · <span id="host-timezone">Europe/Rome</span></p>
+              <img class="host-avatar" src="/assets/jaack-portrait.jpg" alt="Jaack" width="40" height="40">
+              <p>Jaack · <span id="duration-label">30 min</span> · Google Meet</p>
             </div>
 
             <div id="date-step">
               <div class="book-tools">
                 <div>
-                  <span class="field-label" id="length-label">Meeting length</span>
+                  <span class="field-label" id="length-label"><span class="lang-en">Meeting length</span><span class="lang-it">Durata</span></span>
                   <div class="duration-options" role="radiogroup" aria-labelledby="length-label">
-                    <button type="button" class="duration-option selected" data-duration="30" role="radio" aria-checked="true">30m</button>
-                    <button type="button" class="duration-option" data-duration="45" role="radio" aria-checked="false">45m</button>
-                    <button type="button" class="duration-option" data-duration="60" role="radio" aria-checked="false">60m</button>
+                    <button type="button" class="duration-option selected" data-duration="30" role="radio" aria-checked="true"><span class="lang-en">30m</span><span class="lang-it">30 min</span></button>
+                    <button type="button" class="duration-option" data-duration="45" role="radio" aria-checked="false"><span class="lang-en">45m</span><span class="lang-it">45 min</span></button>
+                    <button type="button" class="duration-option" data-duration="60" role="radio" aria-checked="false"><span class="lang-en">60m</span><span class="lang-it">60 min</span></button>
                   </div>
                 </div>
-                <span class="live-calendar"><i aria-hidden="true"></i> Live availability</span>
+                <span class="live-calendar"><i aria-hidden="true"></i> <span class="lang-en">Live availability</span><span class="lang-it">Disponibilità in tempo reale</span></span>
               </div>
 
               <div class="date-time-grid">
-                <div class="calendar" role="group" aria-label="Choose a date">
+                <div class="calendar" role="group" aria-label="Choose a date" data-booking-label="chooseDate">
                   <div class="calendar-nav">
-                    <button type="button" id="previous-month" aria-label="Previous month">
+                    <button type="button" id="previous-month" aria-label="Previous month" data-booking-label="previousMonth">
                       <svg aria-hidden="true" viewBox="0 0 24 24"><path d="m15 18-6-6 6-6"/></svg>
                     </button>
                     <strong id="month-label"></strong>
-                    <button type="button" id="next-month" aria-label="Next month">
+                    <button type="button" id="next-month" aria-label="Next month" data-booking-label="nextMonth">
                       <svg aria-hidden="true" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></svg>
                     </button>
                   </div>
-                  <div class="weekdays" aria-hidden="true"><span>Mon</span><span>Tue</span><span>Wed</span><span>Thu</span><span>Fri</span><span>Sat</span><span>Sun</span></div>
+                  <div class="weekdays" aria-hidden="true"><span><span class="lang-en">Mon</span><span class="lang-it">lun</span></span><span><span class="lang-en">Tue</span><span class="lang-it">mar</span></span><span><span class="lang-en">Wed</span><span class="lang-it">mer</span></span><span><span class="lang-en">Thu</span><span class="lang-it">gio</span></span><span><span class="lang-en">Fri</span><span class="lang-it">ven</span></span><span><span class="lang-en">Sat</span><span class="lang-it">sab</span></span><span><span class="lang-en">Sun</span><span class="lang-it">dom</span></span></div>
                   <div class="calendar-grid" id="calendar-grid"></div>
-                  <p class="book-key"><span class="is-today" aria-hidden="true"></span> Today <span class="gap" aria-hidden="true"></span> <span class="is-suggested" aria-hidden="true"></span> Suggested</p>
-                  <label class="timezone-row" for="viewer-timezone">Time zone
-                    <select id="viewer-timezone"></select>
-                  </label>
+                  <p class="book-key"><span class="is-today" aria-hidden="true"></span> <span class="lang-en">Today</span><span class="lang-it">Oggi</span> <span class="gap" aria-hidden="true"></span> <span class="is-suggested" aria-hidden="true"></span> <span class="lang-en">Suggested</span><span class="lang-it">Consigliato</span></p>
                 </div>
 
                 <div class="times-panel" id="times-panel">
-                  <p class="times-date" id="times-date">Choose a date</p>
-                  <small class="times-hint">Suggested times first</small>
-                  <div class="times-list" id="slots" aria-live="polite" aria-labelledby="times-date"><p class="times-empty">Available times will appear here.</p></div>
+                  <div id="times-step">
+                    <div class="timezone-row">
+                      <p id="timezone-description"></p>
+                      <label for="viewer-timezone"><span class="lang-en">Change</span><span class="lang-it">Cambia</span></label>
+                      <select id="viewer-timezone" aria-describedby="timezone-description"></select>
+                    </div>
+                    <p class="visually-hidden" id="timezone-live" aria-live="polite"></p>
+                    <p class="times-date" id="times-date"><span class="lang-en">Choose a date</span><span class="lang-it">Scegli una data</span></p>
+                    <small class="times-hint"><span class="lang-en">Suggested times first</span><span class="lang-it">Prima gli orari consigliati</span></small>
+                    <div class="times-list" id="slots" aria-live="polite" aria-labelledby="times-date"><p class="times-empty"><span class="lang-en">Looking up times…</span><span class="lang-it">Sto cercando gli orari…</span></p></div>
+                  </div>
+                  <div class="details-step hidden" id="details-step">
+                    <button type="button" class="back-button" id="back-to-calendar">
+                      <svg aria-hidden="true" viewBox="0 0 24 24"><path d="m15 18-6-6 6-6"/></svg>
+                      <span class="lang-en">Back</span><span class="lang-it">Indietro</span>
+                    </button>
+                    <div class="jk-glass jk-panel book-form">
+                      <p class="jk-lab"><span class="lang-en">Almost done</span><span class="lang-it">Quasi fatto</span></p>
+                      <h2><span class="lang-en">Enter your details</span><span class="lang-it">Inserisci i tuoi dati</span></h2>
+                      <div class="selected-summary" id="selected-summary"></div>
+                      <form id="booking-form" class="details-form">
+                        <div id="booking-type-options"></div>
+                        <label for="guest-name"><span class="lang-en">Name</span><span class="lang-it">Nome</span>
+                          <input id="guest-name" maxlength="120" required autocomplete="name" placeholder="Your name" data-booking-placeholder="namePlaceholder">
+                        </label>
+                        <label for="guest-email"><span class="lang-en">Email</span><span class="lang-it">Email</span>
+                          <input id="guest-email" type="email" maxlength="254" required autocomplete="email" placeholder="you@example.com" data-booking-placeholder="emailPlaceholder">
+                        </label>
+                        <label for="meeting-title"><span class="lang-en">Meeting title (optional)</span><span class="lang-it">Titolo dell'incontro (facoltativo)</span>
+                          <input id="meeting-title" maxlength="200" placeholder="What would you like to discuss?" data-booking-placeholder="titlePlaceholder">
+                        </label>
+                        <button type="submit" class="confirm-button"><span class="lang-en">Book</span><span class="lang-it">Prenota</span></button>
+                      </form>
+                      <p class="inline-status hidden" id="booking-status" role="status"></p>
+                    </div>
+                  </div>
                 </div>
               </div>
               <p class="inline-status hidden" id="availability-status" role="status"></p>
-              <button type="button" class="retry-dates hidden" id="retry-dates">Check dates again</button>
+              <button type="button" class="retry-dates hidden" id="retry-dates"><span class="lang-en">Check dates again</span><span class="lang-it">Controlla di nuovo le date</span></button>
             </div>
 
-            <div class="details-step hidden" id="details-step">
-              <button type="button" class="back-button" id="back-to-calendar">
-                <svg aria-hidden="true" viewBox="0 0 24 24"><path d="m15 18-6-6 6-6"/></svg>
-                Back
-              </button>
-              <div class="jk-glass jk-panel book-form">
-                <p class="jk-lab">Almost done</p>
-                <h2>Enter your details</h2>
-                <div class="selected-summary" id="selected-summary"></div>
-                <form id="booking-form" class="details-form">
-                  <div id="booking-type-options"></div>
-                  <label for="guest-name">Name
-                    <input id="guest-name" maxlength="120" required autocomplete="name" placeholder="Your name">
-                  </label>
-                  <label for="guest-email">Email
-                    <input id="guest-email" type="email" maxlength="254" required autocomplete="email" placeholder="you@example.com">
-                  </label>
-                  <label for="meeting-title">Meeting title (optional)
-                    <input id="meeting-title" maxlength="200" placeholder="What would you like to discuss?">
-                  </label>
-                  <button type="submit" class="confirm-button">Schedule event</button>
-                </form>
-                <p class="inline-status hidden" id="booking-status" role="status"></p>
-              </div>
-            </div>
-
-            <div class="success-step hidden" id="success-step">
+            <div class="success-step hidden" id="success-step" tabindex="-1">
               <span class="success-mark" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="m6 12.5 4 4 8-9"/></svg></span>
-              <p class="jk-eb">Confirmed</p>
-              <h2>You’re scheduled</h2>
+              <p class="jk-eb"><span class="lang-en">Confirmed</span><span class="lang-it">Confermato</span></p>
+              <h2><span class="lang-en">You’re scheduled</span><span class="lang-it">Sei in agenda</span></h2>
               <p id="confirmed-title"></p>
-              <p class="success-copy">Your calendar invitation includes the Google Meet link and links to cancel or reschedule.</p>
+              <p class="success-copy"><span class="lang-en">Your calendar invitation includes the Google Meet link and links to cancel or reschedule.</span><span class="lang-it">L'invito in calendario include il link di Google Meet e i link per annullare o spostare l'incontro.</span></p>
               <div class="selected-summary" id="success-summary"></div>
-              <a class="meet-link hidden" id="meet-link" target="_blank" rel="noopener noreferrer">Open Google Meet</a>
-              <p><a class="hidden" id="manage-booking">Cancel or reschedule this meeting</a></p>
+              <a class="meet-link hidden" id="meet-link" target="_blank" rel="noopener noreferrer"><span class="lang-en">Open Google Meet</span><span class="lang-it">Apri Google Meet</span></a>
+              <p><a class="hidden" id="manage-booking"><span class="lang-en">Cancel or reschedule this meeting</span><span class="lang-it">Annulla o sposta questo incontro</span></a></p>
             </div>
           </div>
         </section>
       </div>
       <footer class="booking-footer"><span>Giacomo Barbieri / Jaack · <a href="/privacy">Privacy</a></span><span id="demo-note"></span></footer>
     </main>
-    <script type="module" src="/assets/public.js?v=dc9a50d06b544177"></script>
+    <script type="module" src="/assets/public.js?v=4d4b731904ea6f5e"></script>
   </body>
 </html>

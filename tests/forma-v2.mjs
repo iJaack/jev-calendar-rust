@@ -172,9 +172,11 @@ test('theme switch accessible names start with their canonical visible label in 
 test('slot selection announces its pressed state through selection changes and rerenders', () => {
   const document = testDocument('<div id="slots"></div><p id="demo-note"></p>');
   const slots = [{ start: '2030-01-01T12:00:00Z', end: '2030-01-01T12:30:00Z' }, { start: '2030-01-01T13:00:00Z', end: '2030-01-01T13:30:00Z' }];
-  const state = { availability: { candidates: slots }, choice: null };
+  const state = { availability: { candidates: slots }, choice: null, viewerTimeZone: 'Europe/Rome', durationMinutes: 30 };
   const context = vm.createContext({ document, state, $: (id) => document.getElementById(id), time: (value) => value, showDetails() {} });
   const source = read('public/assets/public.js');
+  vm.runInContext(source.slice(0, source.indexOf('const $ =')), context);
+  vm.runInContext("const t = key => bookingText('en', key); const selectedTime = iso => bookingTime(iso, state.viewerTimeZone, 'Europe/Rome', 'en', state.durationMinutes);", context);
   vm.runInContext(source.slice(source.indexOf('function renderSlots()'), source.indexOf('function renderBookingTypes(')), context);
   context.renderSlots();
   let rows = document.querySelectorAll('.time-choice');

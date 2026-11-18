@@ -18,7 +18,7 @@ def ratio(fg,bg):
     bg=parse(bg) if isinstance(bg,str) else bg
     fg=over(parse(fg),bg)
     a,b=sorted((lum(fg),lum(bg)),reverse=True); return (a+0.05)/(b+0.05)
-TEXT=[('ink','bg'),('ink','surface'),('ink2','bg'),('ink2','surface'),('t2','bg'),('t3','bg'),('t3','surface'),
+TEXT=[('ink','bg'),('ink','surface'),('ink2','bg'),('ink2','surface'),('t2','bg'),('t2','surface'),('t3','bg'),('t3','surface'),
       ('accentText','bg'),('accentText','surface'),('onAccent','accent')]
 MARK=[('accent','bg'),('focus','bg')]
 data=json.loads(pathlib.Path(__file__).with_name('palettes.json').read_text())
