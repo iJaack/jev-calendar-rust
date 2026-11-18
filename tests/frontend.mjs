@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {existsSync,readFileSync} from 'node:fs';
 import vm from 'node:vm';
 import {createHash} from 'node:crypto';
+import {testDocument} from './booking-types-dom.mjs';
 
 const source = readFileSync(new URL('../public/assets/public.js', import.meta.url), 'utf8');
 const functions = source.slice(source.indexOf('const AVAILABILITY_CACHE_MS'), source.indexOf('function renderSlots()'));
@@ -24,6 +25,11 @@ function fixture({prepared=true,allDates=false}={}) {
       return path==='/api/available-dates' ? {dates:['2026-10-09','2026-10-13'], recommendedDate:'2026-10-13', ...(prepared?{firstDateAvailability:first}:{}), ...(allDates?{availabilityByDate:{'2026-10-09':first,'2026-10-13':{...first,date:'2026-10-13'}}}:{})} : {...first,date:body.date};
     }
   });
+  vm.runInContext(source.slice(0, source.indexOf('const $ =')), context);
+  vm.runInContext(`const t = (key, values) => bookingText('en', key, values);
+    const selectedTime = iso => bookingTime(iso, state.viewerTimeZone, state.availability?.hostTimezone, 'en', state.durationMinutes);
+    function updateTimezoneDescription() {}
+    function showLoadingTimes() { $('slots').innerHTML = t('loadingTimes'); }`, context);
   vm.runInContext(functions, context);
   return {context,calls,advance:milliseconds=>{currentTime+=milliseconds;for(const [id,timer] of timers)if(timer.due<=currentTime){timers.delete(id);timer.fn();}}};
 }
@@ -125,8 +131,8 @@ test('a visible calendar rechecks automatically before previews expire without c
 test('opening booking details stops preview timers and ignores an in-flight recheck',async()=>{
   const f=fixture({allDates:true});await f.context.loadMonth();
   const showDetails=source.slice(source.indexOf('function showDetails(slot)'),source.indexOf('function showCalendar()'));
-  f.context.fullDateTime=()=> 'Synthetic selected time';
-  f.context.$('guest-name').focus=()=>{};
+  const document=testDocument(readFileSync(new URL('../public/index.html',import.meta.url),'utf8'));
+  f.context.document=document;f.context.$=id=>document.getElementById(id);
   vm.runInContext(showDetails,f.context);
   const requestId=f.context.state.availabilityRequest,choice=f.context.state.availability.candidates[0];
   f.context.showDetails(choice);f.advance(120_000);

@@ -1,0 +1,66 @@
+.booking-page > .skip-link {
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+  transform: none;
+}
+.booking-page > .skip-link:is(:focus, :focus-visible) {
+  width: auto;
+  height: auto;
+  padding: 10px 14px;
+  margin: 0;
+  overflow: visible;
+  clip: auto;
+  clip-path: none;
+  white-space: normal;
+}
+#date-step .date-time-grid { grid-template-columns: minmax(0, 1fr); max-width: none; }
+#date-step .times-panel { border-left: 0; padding-left: 0; }
+#date-step .timezone-row { margin: 0 0 var(--jk-s3); display: grid; grid-template-columns: 1fr auto; gap: 4px 12px; color: var(--jk-t2); font-size: var(--jk-fs-note); font-weight: 500; letter-spacing: 0; text-transform: none; }
+#timezone-description { align-self: center; overflow-wrap: anywhere; }
+#date-step .timezone-row label { display: flex; align-items: center; min-height: 44px; font-size: var(--jk-fs-xs); font-weight: 700; letter-spacing: var(--jk-track-label); text-transform: uppercase; }
+#viewer-timezone { grid-column: 1 / -1; }
+#slots { display: grid; grid-template-columns: minmax(0, 1fr); align-content: start; gap: 0 16px; max-height: none; }
+#slots .time-button { position: relative; min-width: 0; display: flex; flex-direction: column; align-items: flex-start; justify-content: center; gap: 4px; padding: 10px 4px; transition: none; }
+#slots .time-guest { font: 650 var(--jk-fs-lg, var(--jk-fs-lede))/1.2 var(--jk-font); color: var(--jk-ink); font-variant-numeric: tabular-nums lining-nums; white-space: nowrap; }
+#slots .time-host { color: var(--jk-t2); font-size: var(--jk-fs-note); font-weight: 500; line-height: 1.35; font-variant-numeric: tabular-nums lining-nums; text-wrap: pretty; }
+/* Next shares the first time row; the host line keeps the full row width. */
+#slots .time-choice.selected { grid-template-columns: minmax(0, 1fr); }
+#slots .time-choice.selected .time-button { grid-area: 1 / 1; padding: 0 4px 10px; gap: 0; }
+#slots .time-choice.selected .time-button:not(:has(.time-host)) { padding-bottom: 0; }
+#slots .time-choice.selected .time-guest { display: flex; align-items: center; min-height: 44px; padding-right: 86px; }
+#slots .time-choice.selected .time-button::after { position: absolute; top: 12px; right: 72px; margin: 0; }
+#slots .time-choice.selected .next-button { grid-area: 1 / 1; justify-self: end; align-self: start; margin: 0 4px 0 0; z-index: 1; }
+#slots .next-button { transition: none; }
+#slots .time-choice.selected .next-button { min-width: 60px; padding: 0 10px; }
+.selected-summary .summary-guest { font-size: var(--jk-fs-lede); font-weight: 650; line-height: 1.35; letter-spacing: -0.02em; }
+.selected-summary .summary-host, .selected-summary .summary-meta, .selected-summary .summary-email { color: var(--jk-t2); font-size: var(--jk-fs-note); line-height: 1.45; overflow-wrap: anywhere; }
+#details-step { min-width: 0; }
+#details-step .book-form { padding: var(--jk-s4); }
+#details-step .confirm-button { max-width: 100%; line-height: 1.4; white-space: normal; }
+#retry-dates { min-height: 44px; }
+#date-step:has(#details-step:not(.hidden)) .calendar,
+#date-step:has(#details-step:not(.hidden)) .book-tools,
+#date-step:has(#details-step:not(.hidden)) #availability-status,
+#date-step:has(#details-step:not(.hidden)) #retry-dates { display: none; }
+@container (min-width: 520px) {
+  #slots { grid-template-columns: repeat(2, minmax(0, 1fr)); min-height: 0; }
+  #slots .times-empty, #slots .loading-times { grid-column: 1 / -1; }
+}
+@container (min-width: 760px) {
+  #date-step .date-time-grid { grid-template-columns: minmax(280px, 400px) minmax(0, 1fr); column-gap: var(--jk-s6); align-items: start; }
+  #date-step .times-panel { border-left: 1px solid var(--jk-hair); padding-left: var(--jk-s5); }
+  #slots { grid-template-columns: minmax(0, 1fr); max-height: 420px; min-height: 360px; }
+  #date-step:has(#details-step:not(.hidden)) .calendar { display: block; }
+  #date-step:has(#details-step:not(.hidden)) .book-tools { display: flex; }
+  #details-step .book-form { padding: var(--jk-s3); }
+}
+@media (max-width: 519px) {
+  .booking-page .jk-page { padding-left: max(20px, env(safe-area-inset-left)); padding-right: max(20px, env(safe-area-inset-right)); }
+  .calendar-grid button { min-width: 44px; }
+}

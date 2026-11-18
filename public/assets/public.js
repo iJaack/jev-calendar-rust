@@ -1,4 +1,86 @@
+// Booking presentation only: API instants and availability decisions stay unchanged.
+function bookingText(lang, key, values = {}) {
+  const strings = {
+    home: ['jaack.me booking home', 'jaack.me, pagina di prenotazione'],
+    chooseDate: ['Choose a date', 'Scegli una data'],
+    previousMonth: ['Previous month', 'Mese precedente'], nextMonth: ['Next month', 'Mese successivo'],
+    namePlaceholder: ['Your name', 'Il tuo nome'], emailPlaceholder: ['you@example.com', 'nome@example.com'],
+    titlePlaceholder: ['What would you like to discuss?', 'Di cosa ti piacerebbe parlare?'],
+    purpose: ['What is this for?', 'Di che si tratta?'],
+    timezone: ['Times in your time zone: {zone}', 'Orari nel tuo fuso: {zone}'],
+    timezoneLive: ['Times now shown in {zone}', 'Orari ora mostrati nel fuso {zone}'],
+    next: ['Next', 'Avanti'], nextLabel: ['Next, continue with {weekday} at {time}', 'Avanti, continua con {weekday} alle {time}'],
+    action: ['Book {weekday} at {time}', 'Prenota {weekday} alle {time}'],
+    booking: ['Booking…', 'Sto prenotando…'],
+    loadingTimes: ['Looking up times…', 'Sto cercando gli orari…'],
+    emptyDay: ['No times free on this day: try the next one', 'Nessun orario libero in questo giorno: prova il prossimo'],
+    loadingDates: ['Checking available dates…', 'Sto controllando le date…'],
+    emptyMonth: ['No dates with available times this month.', 'Nessuna data con orari liberi in questo mese.'],
+    partial: ['Some dates could not be checked. Try again later.', 'Non sono riuscito a controllare tutte le date. Riprova tra poco.'],
+    unavailable: ['Availability unavailable', 'Disponibilità non disponibile'],
+    expired: ['Availability needs refreshing. Select a date to check again.', 'La disponibilità va aggiornata. Scegli di nuovo una data.'],
+    slotGone: ['That time just became unavailable. Choose another time.', "Quell'orario non è più libero. Scegline un altro."],
+    dateGone: ['That date just became unavailable. Choose another date.', "Quella data non è più libera. Scegline un'altra."],
+    refreshFailed: ['Could not refresh times yet. Booking will recheck your selection.', 'Non sono ancora riuscito ad aggiornare gli orari. Al momento della prenotazione ricontrollo la tua scelta.'],
+    submitting: ['Rechecking availability and creating your event…', "Sto ricontrollando la disponibilità e creando l'evento…"],
+    conflict: ['That time is no longer available. Go back and choose another.', "Quell'orario non è più disponibile. Torna indietro e scegline un altro."],
+    noTimesAria: [', no available times', ', nessun orario libero'], suggestedAria: [', suggested date', ', data consigliata'],
+    email: ['Check the email sent to {email}', "Controlla l'email a {email}"],
+    demo: ['Demo mode', 'Modalità demo'], demoAvailability: ['Demo availability', 'Disponibilità demo'],
+    tomorrow: ['tomorrow', 'domani'], yesterday: ['yesterday', 'ieri'],
+  };
+  return strings[key][lang === 'it' ? 1 : 0].replace(/\{(\w+)\}/g, (_, name) => values[name] ?? '');
+}
+function bookingTime(iso, viewerZone, hostZone, lang, duration = 30) {
+  const locale = lang === 'it' ? 'it-IT' : 'en-US';
+  const format = (zone, options) => new Intl.DateTimeFormat(locale, { timeZone: zone, ...options }).format(new Date(iso));
+  // Keep the clock intact in slots, summaries and actions, including ICU's narrow spaces.
+  const clock = (zone) => format(zone, lang === 'it' ? { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' } : { hour: 'numeric', minute: '2-digit', hour12: true }).replace(/\s/g, '\u00a0');
+  const date = (zone, year = false) => format(zone, { weekday: 'long', month: 'long', day: 'numeric', ...(year ? { year: 'numeric' } : {}) });
+  const weekday = (zone) => format(zone, { weekday: 'long' });
+  const parts = (zone) => Object.fromEntries(new Intl.DateTimeFormat('en-CA', { timeZone: zone, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).formatToParts(new Date(iso)).map(p => [p.type, p.value]));
+  const guestParts = parts(viewerZone), hostParts = hostZone ? parts(hostZone) : guestParts;
+  const calendarDay = (p) => Date.UTC(Number(p.year), Number(p.month) - 1, Number(p.day));
+  const dayDiff = (calendarDay(hostParts) - calendarDay(guestParts)) / 86_400_000;
+  const different = !!hostZone && (dayDiff !== 0 || hostParts.hour !== guestParts.hour || hostParts.minute !== guestParts.minute);
+  const zoneName = (zone) => zone.replaceAll('_', ' ');
+  const place = hostZone === 'Europe/Rome' ? (lang === 'it' ? 'Roma' : 'Rome') : zoneName(hostZone || viewerZone);
+  const guestPlace = viewerZone.split('/').at(-1).replaceAll('_', ' ');
+  const hostPlace = place;
+  const guest = clock(viewerZone), hostTime = different ? clock(hostZone) : '';
+  const inPlace = lang === 'it' ? `a ${place}` : `in ${place}`;
+  const relativeDay = dayDiff === 1 ? bookingText(lang, 'tomorrow') : dayDiff === -1 ? bookingText(lang, 'yesterday') : different ? weekday(hostZone) : '';
+  const host = different ? `${hostTime}${dayDiff ? `, ${relativeDay}` : ''} ${inPlace}` : '';
+  const summaryHost = different ? `${hostTime}${dayDiff ? `, ${date(hostZone)}` : ''} ${inPlace}` : '';
+  let slotLabel = `${date(viewerZone)}, ${guest}`;
+  if (different) {
+    slotLabel += lang === 'it'
+      ? ` ora di ${guestPlace}, ${hostTime}${dayDiff ? ` di ${weekday(hostZone)}` : ''} ora di ${hostPlace}`
+      : ` ${guestPlace} time, ${hostTime}${dayDiff ? ` ${weekday(hostZone)}` : ''} ${hostPlace} time`;
+  }
+  const values = { weekday: weekday(viewerZone), time: guest };
+  return { guest, host, slotLabel, summaryHost, summaryGuest: `${date(viewerZone, true)}, ${guest}`,
+    summaryMeta: `${duration} min · Google Meet · ${zoneName(viewerZone)}`,
+    actionLabel: bookingText(lang, 'action', values), nextLabel: bookingText(lang, 'nextLabel', values) };
+}
+function renderTimeSummary(document, element, value, email = '') {
+  element.replaceChildren();
+  for (const [className, text] of [['summary-guest', value.summaryGuest], ['summary-host', value.summaryHost], ['summary-meta', value.summaryMeta], ['summary-email', email]]) {
+    if (!text) continue;
+    const line = document.createElement(className === 'summary-guest' ? 'strong' : 'span');
+    line.className = className; line.textContent = text; element.append(line);
+  }
+}
+
 const $ = (id) => document.getElementById(id);
+const language = document.documentElement?.lang === 'it' ? 'it' : 'en';
+const locale = language === 'it' ? 'it-IT' : 'en-US';
+const t = (key, values) => bookingText(language, key, values);
+const selectedTime = (iso) => bookingTime(iso, state.viewerTimeZone, state.availability?.hostTimezone || state.hostTimezone, language, state.durationMinutes);
+function updateTimezoneDescription() { $('timezone-description').textContent = t('timezone', { zone: zoneLabel(state.viewerTimeZone) }); }
+function showLoadingTimes() { $('slots').innerHTML = `<p class="times-empty">${t('loadingTimes')}</p><div class="loading-times" aria-hidden="true"><i></i><i></i><i></i></div>`; }
+for (const element of document.querySelectorAll('[data-booking-label]')) element.setAttribute('aria-label', t(element.dataset.bookingLabel));
+for (const element of document.querySelectorAll('[data-booking-placeholder]')) element.setAttribute('placeholder', t(element.dataset.bookingPlaceholder));
 
 function detectedTimeZone() {
   const zone = Intl.DateTimeFormat().resolvedOptions().timeZone;
@@ -33,6 +115,8 @@ function populateTimeZones(selected) {
 const viewerTimeZone = detectedTimeZone();
 const state = {
   durationMinutes: 30,
+  hostTimezone: null,
+  submitting: false,
   viewerTimeZone,
   visibleMonth: startOfMonth(parseDateKey(dateKeyInZone(Date.now(), viewerTimeZone))),
   selectedDate: null,
@@ -46,9 +130,7 @@ const state = {
   availabilityCache: new Map(),
 };
 
-function dayLabel(value) { return new Intl.DateTimeFormat('en-US', { weekday: 'long', month: 'long', day: 'numeric', timeZone: 'UTC' }).format(new Date(`${value}T12:00:00Z`)); }
-function time(iso) { return new Intl.DateTimeFormat('en-US', { hour: 'numeric', minute: '2-digit', timeZoneName: 'short', timeZone: state.viewerTimeZone }).format(new Date(iso)); }
-function fullDateTime(iso) { return new Intl.DateTimeFormat('en-US', { weekday: 'long', month: 'long', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZoneName: 'short', timeZone: state.viewerTimeZone }).format(new Date(iso)); }
+function dayLabel(value) { return new Intl.DateTimeFormat(locale, { weekday: 'long', month: 'long', day: 'numeric', timeZone: 'UTC' }).format(new Date(`${value}T12:00:00Z`)); }
 
 async function request(path, options) {
   const response = await fetch(path, { ...options, headers: { ...(options?.headers || {}), 'X-Jev-Booking': '1' } });
@@ -64,7 +146,7 @@ function setStatus(element, text = '', error = false) {
 
 function renderCalendar() {
   const month = state.visibleMonth;
-  $('month-label').textContent = new Intl.DateTimeFormat('en-US', { month: 'long', year: 'numeric' }).format(month);
+  $('month-label').textContent = new Intl.DateTimeFormat(locale, { month: 'long', year: 'numeric' }).format(month);
   const grid = $('calendar-grid'); grid.replaceChildren();
   const mondayOffset = (month.getDay() + 6) % 7;
   const lastDay = new Date(month.getFullYear(), month.getMonth() + 1, 0).getDate();
@@ -80,13 +162,13 @@ function renderCalendar() {
     button.type = 'button'; button.textContent = String(day); button.dataset.date = key;
     const inRange = date >= today && date <= maxDate;
     const unavailable = inRange && state.availableDates !== null && !state.availableDates.has(key);
-    button.setAttribute('aria-label', `${dayLabel(key)}${unavailable ? ', no available times' : key === state.recommendedDate ? ', suggested date' : ''}`);
+    button.setAttribute('aria-label', `${dayLabel(key)}${unavailable ? t('noTimesAria') : key === state.recommendedDate ? t('suggestedAria') : ''}`);
     const disabled = !inRange || !state.availableDates?.has(key);
     button.disabled = disabled;
     if (key === localDateKey(today)) button.classList.add('today');
     if (!disabled && key === state.recommendedDate) button.classList.add('recommended');
     if (key === state.selectedDate) { button.classList.add('selected'); button.setAttribute('aria-current', 'date'); }
-    if (!disabled) button.addEventListener('click', () => selectDate(key));
+    if (!disabled) button.addEventListener('click', () => { showCalendar(); selectDate(key); });
     grid.append(button);
   }
   $('previous-month').disabled = month <= startOfMonth(today);
@@ -119,7 +201,7 @@ function expireAvailability(key, entry, requestId) {
     state.choice = null;
     $('slots').replaceChildren();
     showCalendar();
-    setStatus($('availability-status'), 'Availability needs refreshing. Select a date to check again.');
+    setStatus($('availability-status'), t('expired'));
     $('retry-dates').classList.remove('hidden');
   }, Math.max(0, entry.validUntil - performance.now()));
 }
@@ -136,9 +218,9 @@ async function loadMonth(preferredDate = null) {
   state.availableDates = null; state.recommendedDate = null; state.selectedDate = null; state.choice = null; state.availability = null;
   renderCalendar();
   $('retry-dates').classList.add('hidden');
-  setStatus($('availability-status'), 'Checking available dates…');
-  $('times-date').textContent = 'Checking available dates';
-  $('slots').innerHTML = '<div class="loading-times"><i></i><i></i><i></i></div>';
+  setStatus($('availability-status'), t('loadingDates'));
+  $('times-date').textContent = t('loadingDates');
+  showLoadingTimes();
   try {
     const month = localDateKey(state.visibleMonth).slice(0, 7);
     const result = await request('/api/available-dates', {
@@ -154,21 +236,21 @@ async function loadMonth(preferredDate = null) {
     state.recommendedDate = result.recommendedDate && state.availableDates.has(result.recommendedDate) ? result.recommendedDate : null;
     renderCalendar();
     if (!result.dates.length) {
-      setStatus($('availability-status'), result.partial ? 'Some dates could not be checked. Try again later.' : 'No dates with available times this month.', Boolean(result.partial));
+      setStatus($('availability-status'), result.partial ? t('partial') : t('emptyMonth'), Boolean(result.partial));
       $('retry-dates').classList.remove('hidden');
-      $('times-date').textContent = 'No available dates';
+      $('times-date').textContent = t('emptyMonth');
       $('slots').replaceChildren();
       return;
     }
     setStatus($('availability-status'));
     const firstDate = preferredDate && state.availableDates.has(preferredDate) ? preferredDate : result.dates[0];
     await selectDate(firstDate);
-    if (result.partial && requestId === state.monthRequest) setStatus($('availability-status'), 'Some dates could not be checked. Try again later.');
+    if (result.partial && requestId === state.monthRequest) setStatus($('availability-status'), t('partial'));
   } catch (error) {
     if (requestId !== state.monthRequest) return;
-    setStatus($('availability-status'), `Could not check available dates: ${error.message}`, true);
+    setStatus($('availability-status'), error instanceof TypeError ? t('unavailable') : `${t('unavailable')}: ${error.message}`, true);
     $('retry-dates').classList.remove('hidden');
-    $('times-date').textContent = 'Availability unavailable';
+    $('times-date').textContent = t('unavailable');
     $('slots').replaceChildren();
   }
 }
@@ -186,12 +268,12 @@ async function selectDate(date, preserveChoice = false) {
   $('times-date').textContent = dayLabel(date);
   if (recent) {
     $('viewer-timezone').value = cached.value.viewerTimeZone;
-    $('host-timezone').textContent = zoneLabel(cached.value.hostTimezone);
+    state.hostTimezone = cached.value.hostTimezone || state.hostTimezone;
     renderSlots();
     expireAvailability(key, cached, requestId);
     if (cached.expiresAt > startedAt && !preserveChoice) return;
   } else {
-    $('slots').innerHTML = '<div class="loading-times"><i></i><i></i><i></i></div>';
+    showLoadingTimes();
   }
   try {
     const availability = await request('/api/availability', {
@@ -200,24 +282,25 @@ async function selectDate(date, preserveChoice = false) {
     });
     if (requestId !== state.availabilityRequest) return;
     const entry = cacheAvailability(key, availability, startedAt);
-    if (entry.validUntil <= performance.now()) throw new Error('Calendar is refreshing. Please check again shortly.');
+    if (entry.validUntil <= performance.now()) throw new Error(t('expired'));
     const choice = state.choice;
     if (choice && !availability.candidates.some(slot => slot.start === choice.start && slot.end === choice.end)) {
       state.choice = null;
       showCalendar();
-      setStatus($('availability-status'), 'That time just became unavailable. Choose another time.');
+      setStatus($('availability-status'), t('slotGone'));
     }
-    const candidatesChanged = JSON.stringify(state.availability?.candidates) !== JSON.stringify(availability.candidates);
+    const candidatesChanged = JSON.stringify(state.availability?.candidates) !== JSON.stringify(availability.candidates) || state.availability?.hostTimezone !== availability.hostTimezone;
     state.availability = availability;
     state.viewerTimeZone = availability.viewerTimeZone;
     $('viewer-timezone').value = state.viewerTimeZone;
-    $('host-timezone').textContent = zoneLabel(availability.hostTimezone);
+    state.hostTimezone = availability.hostTimezone || state.hostTimezone;
+    updateTimezoneDescription();
     if (!availability.candidates.length) {
       state.availableDates.delete(date);
       if (state.recommendedDate === date) state.recommendedDate = null;
       state.selectedDate = null;
       renderCalendar();
-      setStatus($('availability-status'), 'That date just became unavailable. Choose another date.');
+      setStatus($('availability-status'), t('dateGone'));
       if (!state.availableDates.size) $('retry-dates').classList.remove('hidden');
     }
     // Preserve selections and keyboard focus when the background result is unchanged.
@@ -232,13 +315,13 @@ async function selectDate(date, preserveChoice = false) {
       showCalendar();
     }
     if (!error.invalidatePreview && recent && cached.validUntil > performance.now()) {
-      setStatus($('availability-status'), 'Could not refresh times yet. Booking will recheck your selection.');
+      setStatus($('availability-status'), t('refreshFailed'));
       return;
     }
     state.availabilityCache.delete(key);
     state.availability = null; state.choice = null;
     $('slots').replaceChildren();
-    setStatus($('availability-status'), error.message, true);
+    setStatus($('availability-status'), error instanceof TypeError ? t('unavailable') : error.message, true);
     $('retry-dates').classList.remove('hidden');
   }
 }
@@ -247,13 +330,18 @@ function renderSlots() {
   const { candidates } = state.availability;
   const list = $('slots'); list.replaceChildren();
   if (!candidates.length) {
-    const empty = document.createElement('p'); empty.className = 'times-empty'; empty.textContent = 'No times fit Jaack’s calendar and meeting spacing on this date. Try another date.'; list.append(empty); return;
+    const empty = document.createElement('p'); empty.className = 'times-empty'; empty.textContent = t('emptyDay'); list.append(empty); return;
   }
   for (const slot of candidates) {
     const row = document.createElement('div'); row.className = 'time-choice';
-    const select = document.createElement('button'); select.type = 'button'; select.className = 'time-button'; select.textContent = time(slot.start);
+    const value = selectedTime(slot.start);
+    const select = document.createElement('button'); select.type = 'button'; select.className = 'time-button'; select.setAttribute('aria-label', value.slotLabel);
+    for (const [className, text] of [['time-guest', value.guest], ['time-host', value.host]]) {
+      if (!text) continue;
+      const line = document.createElement('span'); line.className = className; line.textContent = text; line.setAttribute('aria-hidden', 'true'); select.append(line);
+    }
     select.setAttribute('aria-pressed', String(state.choice?.start === slot.start && state.choice?.end === slot.end));
-    const next = document.createElement('button'); next.type = 'button'; next.className = 'next-button'; next.textContent = 'Next'; next.setAttribute('aria-label', `Next, continue with ${time(slot.start)}`); next.setAttribute('aria-hidden', 'true'); next.tabIndex = -1; next.disabled = true;
+    const next = document.createElement('button'); next.type = 'button'; next.className = 'next-button'; next.textContent = t('next'); next.setAttribute('aria-label', value.nextLabel); next.setAttribute('aria-hidden', 'true'); next.tabIndex = -1; next.disabled = true;
     select.addEventListener('click', () => activateTime(row, slot));
     next.addEventListener('click', () => showDetails(slot));
     if (state.choice?.start === slot.start && state.choice?.end === slot.end) {
@@ -261,7 +349,7 @@ function renderSlots() {
     }
     row.append(select, next); list.append(row);
   }
-  $('demo-note').textContent = state.availability.demo ? 'Demo availability' : '';
+  $('demo-note').textContent = state.availability.demo ? t('demoAvailability') : '';
 }
 
 function activateTime(row, slot) {
@@ -279,7 +367,7 @@ function activateTime(row, slot) {
 function renderBookingTypes(types) {
   if (!Array.isArray(types) || !types.length) return;
   const group = document.createElement('fieldset'); group.className = 'booking-types';
-  const legend = document.createElement('legend'); legend.textContent = 'What is this for?'; group.append(legend);
+  const legend = document.createElement('legend'); legend.textContent = t('purpose'); group.append(legend);
   for (const type of types) {
     const label = document.createElement('label');
     const radio = document.createElement('input');
@@ -295,19 +383,21 @@ function showDetails(slot) {
   clearAvailabilityTimers();
   ++state.availabilityRequest;
   state.choice = slot;
-  $('date-step').classList.add('hidden');
+  $('times-step').classList.add('hidden');
   $('details-step').classList.remove('hidden');
-  $('selected-summary').innerHTML = `<strong>${fullDateTime(slot.start)}</strong><span>${state.durationMinutes} min · Google Meet · ${zoneLabel(state.viewerTimeZone)}</span>`;
+  renderTimeSummary(document, $('selected-summary'), selectedTime(slot.start));
+  $('booking-form').querySelector('button[type="submit"]').textContent = selectedTime(slot.start).actionLabel;
   $('guest-name').focus();
 }
 
 function showCalendar() {
   $('details-step').classList.add('hidden');
-  $('date-step').classList.remove('hidden');
+  $('times-step').classList.remove('hidden');
   setStatus($('booking-status'));
 }
 
 document.querySelectorAll('.duration-option').forEach((button) => button.addEventListener('click', () => {
+  showCalendar();
   const preferredDate = state.selectedDate;
   state.durationMinutes = Number(button.dataset.duration);
   document.querySelectorAll('.duration-option').forEach((item) => {
@@ -317,24 +407,28 @@ document.querySelectorAll('.duration-option').forEach((button) => button.addEven
   loadMonth(preferredDate);
 }));
 
-$('previous-month').addEventListener('click', () => { state.visibleMonth = new Date(state.visibleMonth.getFullYear(), state.visibleMonth.getMonth() - 1, 1, 12); loadMonth(); });
-$('next-month').addEventListener('click', () => { state.visibleMonth = new Date(state.visibleMonth.getFullYear(), state.visibleMonth.getMonth() + 1, 1, 12); loadMonth(); });
+$('previous-month').addEventListener('click', () => { showCalendar(); state.visibleMonth = new Date(state.visibleMonth.getFullYear(), state.visibleMonth.getMonth() - 1, 1, 12); loadMonth(); });
+$('next-month').addEventListener('click', () => { showCalendar(); state.visibleMonth = new Date(state.visibleMonth.getFullYear(), state.visibleMonth.getMonth() + 1, 1, 12); loadMonth(); });
 $('retry-dates').addEventListener('click', () => loadMonth(state.selectedDate));
 $('back-to-calendar').addEventListener('click', () => { showCalendar(); selectDate(state.selectedDate); });
 document.addEventListener('visibilitychange', () => {
-  if (document.visibilityState === 'visible' && !$('date-step').classList.contains('hidden')) selectDate(state.selectedDate, true);
+  if (document.visibilityState === 'visible' && !$('date-step').classList.contains('hidden') && !$('times-step').classList.contains('hidden')) selectDate(state.selectedDate, true);
 });
 $('viewer-timezone').addEventListener('change', () => {
   const preferredDate = state.selectedDate;
   state.viewerTimeZone = $('viewer-timezone').value;
+  updateTimezoneDescription();
+  $('timezone-live').textContent = t('timezoneLive', { zone: zoneLabel(state.viewerTimeZone) });
   state.visibleMonth = startOfMonth(state.selectedDate ? parseDateKey(state.selectedDate) : parseDateKey(dateKeyInZone(Date.now(), state.viewerTimeZone)));
   loadMonth(preferredDate);
 });
 
 $('booking-form').addEventListener('submit', async (event) => {
   event.preventDefault();
-  const button = event.submitter; button.disabled = true; button.textContent = 'Scheduling…';
-  setStatus($('booking-status'), 'Rechecking availability and creating your event…');
+  if (state.submitting) return;
+  state.submitting = true;
+  const button = event.submitter || $('booking-form').querySelector('button[type="submit"]'); button.disabled = true; button.textContent = t('booking');
+  setStatus($('booking-status'), t('submitting'));
   try {
     const bookingInput = {
       ...state.choice,
@@ -354,9 +448,10 @@ $('booking-form').addEventListener('submit', async (event) => {
       body: JSON.stringify({ ...bookingInput, idempotencyKey: state.bookingAttempt.key }),
     });
     clearAvailabilityTimers();
-    $('details-step').classList.add('hidden'); $('success-step').classList.remove('hidden');
+    $('date-step').classList.add('hidden'); $('details-step').classList.add('hidden'); $('success-step').classList.remove('hidden');
     $('confirmed-title').textContent = result.booking.meetingTitle || '';
-    $('success-summary').innerHTML = `<strong>${fullDateTime(state.choice.start)}</strong><span>${state.durationMinutes} min · Google Meet · ${zoneLabel(state.viewerTimeZone)}</span>`;
+    renderTimeSummary(document, $('success-summary'), selectedTime(state.choice.start), t('email', { email: bookingInput.guestEmail }));
+    $('success-step').focus();
     if (selectedType) {
       const label = result.booking.bookingTypeLabel || selectedType.closest('label').textContent;
       const type = document.createElement('span'); type.textContent = label;
@@ -366,16 +461,21 @@ $('booking-form').addEventListener('submit', async (event) => {
     if (result.booking.meetLink) { $('meet-link').href = result.booking.meetLink; $('meet-link').classList.remove('hidden'); }
   } catch (error) {
     const conflict = error.message.includes('busy') || error.message.includes('required_buffer');
-    setStatus($('booking-status'), conflict ? 'That time is no longer available. Go back and choose another.' : error.message, true);
+    setStatus($('booking-status'), conflict ? t('conflict') : error instanceof TypeError ? t('unavailable') : error.message, true);
   } finally {
-    button.disabled = false; button.textContent = 'Schedule event';
+    state.submitting = false;
+    button.disabled = false; button.textContent = selectedTime(state.choice.start).actionLabel;
   }
 });
 
 populateTimeZones(state.viewerTimeZone);
+updateTimezoneDescription();
 fetch('/api/config').then((response) => response.json()).then((config) => {
   renderBookingTypes(config.bookingTypes);
-  if (config.demo) $('demo-note').textContent = 'Demo mode';
-  if (config.hostTimezone) $('host-timezone').textContent = zoneLabel(config.hostTimezone);
+  if (config.demo) $('demo-note').textContent = t('demo');
+  if (config.hostTimezone && !state.availability?.hostTimezone) {
+    state.hostTimezone = config.hostTimezone;
+    if (state.availability) renderSlots();
+  }
 }).catch(() => {});
 loadMonth();
