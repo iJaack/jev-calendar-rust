@@ -6,12 +6,33 @@ import { createHash } from 'node:crypto';
 import { testDocument } from './booking-types-dom.mjs';
 const html = readFileSync(new URL('../public/index.html', import.meta.url), 'utf8');
 const source = readFileSync(new URL('../public/assets/public.js', import.meta.url), 'utf8');
-function helpers() {
-  const context = vm.createContext({ Intl, Date });
+function helpers(intl = Intl) {
+  const context = vm.createContext({ Intl: intl, Date });
   vm.runInContext(source.slice(0, source.indexOf('const $ =')), context);
   return context;
 }
 const instant = '2026-11-24T14:00:00Z';
+test('every clock segment uses only nonbreaking spaces, including ICU narrow-space output', () => {
+  for (const separator of [' ', '\u202f', '\t', '\n']) {
+    const { bookingTime } = helpers({ DateTimeFormat: function(locale, options) {
+      const formatter = new Intl.DateTimeFormat(locale, options);
+      if (options.hour && !options.day) return { format: date => formatter.format(date).replace(/\s/g, separator) };
+      return formatter;
+    } });
+    for (const lang of ['en', 'it']) for (const zone of ['America/New_York', 'Europe/Rome', 'Europe/Paris', 'America/Los_Angeles', 'Asia/Tokyo']) {
+      const value = bookingTime(instant, zone, 'Europe/Rome', lang);
+      for (const key of ['guest', 'host', 'slotLabel', 'summaryGuest', 'summaryHost', 'actionLabel', 'nextLabel']) {
+        if (!value[key]) continue;
+        const clocks = [...value[key].matchAll(/\d{1,2}:\d{2}(?:\s+[AP]M)?/g)].map(match => match[0]);
+        assert.ok(clocks.length, `${lang}/${zone}/${key}: includes a clock`);
+        for (const clock of clocks) {
+          assert.doesNotMatch(clock.replaceAll('\u00a0', ''), /\s/, `${lang}/${zone}/${key}: no breakable clock whitespace`);
+          if (lang === 'en') assert.match(clock, /^\d{1,2}:\d{2}\u00a0[AP]M$/, 'AM/PM uses U+00A0');
+        }
+      }
+    }
+  }
+});
 test('booking markup is compatible with the production script and style CSP', () => {
   const document = testDocument(html);
   for (const script of document.querySelectorAll('script')) {
@@ -87,25 +108,25 @@ for (const lang of ['it', 'en']) {
     for (const zone of ['Europe/Rome', 'Europe/Paris']) {
       const value = b(instant, zone);
       assert.equal(value.host, ''); assert.equal(value.summaryHost, '');
-      assert.equal(value.slotLabel, lang === 'it' ? 'martedì 24 novembre, 15:00' : 'Tuesday, November 24, 3:00 PM');
+      assert.equal(value.slotLabel, lang === 'it' ? 'martedì 24 novembre, 15:00' : 'Tuesday, November 24, 3:00\u00a0PM');
     }
     const ny = b(instant, 'America/New_York');
-    assert.equal(ny.guest, lang === 'it' ? '09:00' : '9:00 AM');
-    assert.equal(ny.host, lang === 'it' ? '15:00 a Roma' : '3:00 PM in Rome');
-    assert.equal(ny.slotLabel, lang === 'it' ? 'martedì 24 novembre, 09:00 ora di New York, 15:00 ora di Roma' : 'Tuesday, November 24, 9:00 AM New York time, 3:00 PM Rome time');
-    assert.equal(ny.nextLabel, lang === 'it' ? 'Avanti, continua con martedì alle 09:00' : 'Next, continue with Tuesday at 9:00 AM');
-    assert.equal(ny.actionLabel, lang === 'it' ? 'Prenota martedì alle 09:00' : 'Book Tuesday at 9:00 AM');
-    assert.equal(ny.summaryGuest, lang === 'it' ? 'martedì 24 novembre 2026, 09:00' : 'Tuesday, November 24, 2026, 9:00 AM');
+    assert.equal(ny.guest, lang === 'it' ? '09:00' : '9:00\u00a0AM');
+    assert.equal(ny.host, lang === 'it' ? '15:00 a Roma' : '3:00\u00a0PM in Rome');
+    assert.equal(ny.slotLabel, lang === 'it' ? 'martedì 24 novembre, 09:00 ora di New York, 15:00 ora di Roma' : 'Tuesday, November 24, 9:00\u00a0AM New York time, 3:00\u00a0PM Rome time');
+    assert.equal(ny.nextLabel, lang === 'it' ? 'Avanti, continua con martedì alle 09:00' : 'Next, continue with Tuesday at 9:00\u00a0AM');
+    assert.equal(ny.actionLabel, lang === 'it' ? 'Prenota martedì alle 09:00' : 'Book Tuesday at 9:00\u00a0AM');
+    assert.equal(ny.summaryGuest, lang === 'it' ? 'martedì 24 novembre 2026, 09:00' : 'Tuesday, November 24, 2026, 9:00\u00a0AM');
     assert.equal(ny.summaryMeta, '45 min · Google Meet · America/New York');
     assert.equal(bookingText(lang, 'booking'), lang === 'it' ? 'Sto prenotando…' : 'Booking…');
     const la = b('2026-11-24T05:00:00Z', 'America/Los_Angeles');
-    assert.equal(la.host, lang === 'it' ? '06:00, domani a Roma' : '6:00 AM, tomorrow in Rome');
-    assert.equal(la.summaryHost, lang === 'it' ? '06:00, martedì 24 novembre a Roma' : '6:00 AM, Tuesday, November 24 in Rome');
-    assert.equal(la.slotLabel, lang === 'it' ? 'lunedì 23 novembre, 21:00 ora di Los Angeles, 06:00 di martedì ora di Roma' : 'Monday, November 23, 9:00 PM Los Angeles time, 6:00 AM Tuesday Rome time');
+    assert.equal(la.host, lang === 'it' ? '06:00, domani a Roma' : '6:00\u00a0AM, tomorrow in Rome');
+    assert.equal(la.summaryHost, lang === 'it' ? '06:00, martedì 24 novembre a Roma' : '6:00\u00a0AM, Tuesday, November 24 in Rome');
+    assert.equal(la.slotLabel, lang === 'it' ? 'lunedì 23 novembre, 21:00 ora di Los Angeles, 06:00 di martedì ora di Roma' : 'Monday, November 23, 9:00\u00a0PM Los Angeles time, 6:00\u00a0AM Tuesday Rome time');
     const asia = b('2026-11-23T23:00:00Z', 'Asia/Tokyo', 'America/New_York');
-    assert.equal(asia.host, lang === 'it' ? '18:00, ieri a America/New York' : '6:00 PM, yesterday in America/New York');
+    assert.equal(asia.host, lang === 'it' ? '18:00, ieri a America/New York' : '6:00\u00a0PM, yesterday in America/New York');
     const romeYesterday = b('2026-11-23T22:00:00Z', 'Asia/Tokyo');
-    assert.equal(romeYesterday.host, lang === 'it' ? '23:00, ieri a Roma' : '11:00 PM, yesterday in Rome');
+    assert.equal(romeYesterday.host, lang === 'it' ? '23:00, ieri a Roma' : '11:00\u00a0PM, yesterday in Rome');
     // Extreme offsets can cross two calendar dates; use a weekday rather than tomorrow.
     const far = b('2026-11-24T11:00:00Z', 'Etc/GMT+12', 'Pacific/Kiritimati');
     assert.match(far.host, lang === 'it' ? /mercoledì a Pacific\/Kiritimati/ : /Wednesday in Pacific\/Kiritimati/);
@@ -182,7 +203,7 @@ for (const lang of ['it', 'en']) {
     const get = id => f.document.getElementById(id);
     assert.equal(f.document.querySelectorAll('.time-host').length, 0);
     get('viewer-timezone').value = 'America/New_York'; await f.event('viewer-timezone', 'change');
-    assert.equal(f.document.querySelector('.time-host').textContent, lang === 'it' ? '15:00 a Roma' : '3:00 PM in Rome');
+    assert.equal(f.document.querySelector('.time-host').textContent, lang === 'it' ? '15:00 a Roma' : '3:00\u00a0PM in Rome');
     assert.equal(get('timezone-live').textContent, lang === 'it' ? 'Orari ora mostrati nel fuso America/New York' : 'Times now shown in America/New York');
     assert.equal(get('times-date').textContent, lang === 'it' ? 'martedì 24 novembre' : 'Tuesday, November 24');
     assert.equal(get('month-label').textContent, lang === 'it' ? 'novembre 2026' : 'November 2026');

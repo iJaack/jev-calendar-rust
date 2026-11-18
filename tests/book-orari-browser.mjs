@@ -59,6 +59,29 @@ export default async (page) => {
     check(await page.locator('.time-host').count() === (kind === 'same' ? 0 : kind === 'rollover' ? 3 : 4), `${lang}/${width}/${theme}/${kind}: host lines`);
   }
   async function capture(lang, kind, step, width, theme) {
+    await page.evaluate(() => document.fonts.ready);
+    const clocks = await page.evaluate(() => {
+      const results = [];
+      for (const element of document.querySelectorAll('.time-guest,.time-host,.summary-guest,.summary-host,.confirm-button')) {
+        if (!element.getClientRects().length) continue;
+        const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
+        while (walker.nextNode()) {
+          const node = walker.currentNode;
+          for (const match of node.textContent.matchAll(/\d{1,2}:\d{2}(?:\s+[AP]M)?/g)) {
+            const range = document.createRange();
+            range.setStart(node, match.index); range.setEnd(node, match.index + match[0].length);
+            const rects = [...range.getClientRects()].filter(rect => rect.width && rect.height);
+            results.push({ element: element.className, text: match[0], tops: [...new Set(rects.map(rect => rect.top))] });
+          }
+        }
+      }
+      return results;
+    });
+    const wrapped = clocks.filter(clock => clock.tops.length !== 1);
+    check(clocks.length > 0 && !wrapped.length, `${lang}/${width}/${theme}/${step}: every guest/host clock stays on one line${wrapped.length ? ` (${JSON.stringify(wrapped)})` : ''}`);
+    if (lang === 'en' && width === 1280 && kind === 'diversi' && step === 'form') {
+      check(clocks.some(clock => clock.element.includes('confirm-button') && clock.text === '9:00\u00a0AM' && clock.tops.length === 1), `1280/${theme}: confirm button keeps 9:00 AM on one line`);
+    }
     await page.evaluate(() => { document.activeElement?.blur(); scrollTo(0, 0); });
     const path = `${output}/${lang}-${kind}-${step}-${width}-${theme}.png`;
     await page.screenshot({ path, fullPage: true }); report.captures.push(path);
@@ -125,6 +148,8 @@ export default async (page) => {
   }
   await prepare('en', 1280, 'ombra'); await capture('en', 'diversi', 'slot', 1280, 'ombra');
   await details(1280); await capture('en', 'diversi', 'form', 1280, 'ombra');
+  await success('en'); await capture('en', 'diversi', 'conferma', 1280, 'ombra');
+  await prepare('en', 1280, 'ombra'); await details(1280);
   await page.locator('#back-to-calendar').click(); check(await page.locator('#times-step').isVisible(), 'Back restores list');
   await page.locator('#viewer-timezone').selectOption('Europe/Rome'); await page.waitForFunction(() => !document.querySelector('.time-host'));
   check((await page.locator('#timezone-live').innerText()).includes('Europe/Rome'), 'reverse zone change announced');

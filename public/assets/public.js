@@ -34,7 +34,8 @@ function bookingText(lang, key, values = {}) {
 function bookingTime(iso, viewerZone, hostZone, lang, duration = 30) {
   const locale = lang === 'it' ? 'it-IT' : 'en-US';
   const format = (zone, options) => new Intl.DateTimeFormat(locale, { timeZone: zone, ...options }).format(new Date(iso));
-  const clock = (zone) => format(zone, lang === 'it' ? { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' } : { hour: 'numeric', minute: '2-digit', hour12: true });
+  // Keep the clock intact in slots, summaries and actions, including ICU's narrow spaces.
+  const clock = (zone) => format(zone, lang === 'it' ? { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' } : { hour: 'numeric', minute: '2-digit', hour12: true }).replace(/\s/g, '\u00a0');
   const date = (zone, year = false) => format(zone, { weekday: 'long', month: 'long', day: 'numeric', ...(year ? { year: 'numeric' } : {}) });
   const weekday = (zone) => format(zone, { weekday: 'long' });
   const parts = (zone) => Object.fromEntries(new Intl.DateTimeFormat('en-CA', { timeZone: zone, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).formatToParts(new Date(iso)).map(p => [p.type, p.value]));
