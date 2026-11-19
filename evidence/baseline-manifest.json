@@ -4,7 +4,7 @@
   "THREAT-AND-PRIVACY.md": "5e44c8ec3697eb9583ae5625212d13d678c8a6dd16e1dffcca696330898a8044",
   "deploy/cloudflared.yml": "6ab31ffc1b79eb56e88d7fb7469589ac6b48605603d9c2a896a3f8f961a61dd0",
   "deploy/me.jaack.jev-calendar-public.plist": "17ad832d2393797fb28d3e85cf84b8ddbc079a13800dbef7e729c867964832e8",
-  "deploy/me.jaack.jev-calendar-tunnel.plist": "001c08a36972c81e9077fe44e95d9e04f60c46b69f0a0fadd0bd23774543bac0",
+  "deploy/me.jaack.jev-calendar-tunnel.plist": "4e2b0cec785fb687fac21b0b548afce22170e60155df98ec9d7f7641c8bfcbe9",
   "deploy/me.jaack.jev-calendar.plist": "b36c0626470210321fc3c6c9a6fc1675e1cd1240cd9a6086e479083793c96df1",
   "deploy/run-private.sh": "83d20666b2187d287c84d5cd75c56dcbdd003603c9ec34df702182d077b15125",
   "deploy/run-public.sh": "0338755485305587d12b1dfe4a76dd91611e68748332a784a399afae946c14b7",
